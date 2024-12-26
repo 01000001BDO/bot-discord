@@ -97,7 +97,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}else {
 			embed := &discordgo.MessageEmbed{
 				Title:       "Contribute with Us!",
-				Description: "Feel free to contribute <3 :\n\n[GitHub Repository Link](https://github.com/your-repo-url/)",
+				Description: "Feel free to contribute <3 :\n\n[GitHub Repo Link](https://github.com/01000001BDO/bot-discord)",
 				Color:       0x00FF00, 
 				Footer: &discordgo.MessageEmbedFooter{
 					Text:    "Thank you for your support!",
