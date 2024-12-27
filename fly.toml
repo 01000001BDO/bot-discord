@@ -16,6 +16,30 @@ primary_region = 'cdg'
   min_machines_running = 0
   processes = ['app']
 
+<<<<<<< HEAD
+=======
+[[services]]
+  protocol = 'tcp'
+  internal_port = 8080
+
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ['http']
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ['tls', 'http']
+
+  [services.concurrency]
+    type = 'connections'
+    hard_limit = 25
+    soft_limit = 20
+
+>>>>>>> dcaf5d4 (feat: refactor Docker setup and enhance game logic with whitelist management 🐨)
 [[vm]]
   memory = '2gb'
   cpu_kind = 'shared'
