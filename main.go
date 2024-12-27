@@ -158,7 +158,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			logMsg("OK", fmt.Sprintf("jawb  l  /dh latence command b : %d ms", latency))
 		}
 		if args[1] == "memes" {
-			logMsg("WARN", "Memes command is not yet implemented.")
+			// reques to  an ig acccount to store on an Dynamaic array : 
+			os.Create("..:")
 		}
 
 
