@@ -2,29 +2,94 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
+	"math"
 	"github.com/bwmarrin/discordgo"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/joho/godotenv"
 	"google.golang.org/api/option"
-	"encoding/json"
-	"time"
 )
 
 const (
 	dh 		string 	= 	"/dh"
 	ai 		string 	= 	"/ai"
+	v string = 	"/ait-akinator"
 	dhPlay 	string 	= 	"/dh-play" 
 	RED 	string  = 	"\033[31m"
 	YELLOW 	string  = 	"\033[33m"
 	BLUE 	string 	= 	"\033[34m"
 	GREEN 	string 	= 	"\033[32m"
 )
+
+var (
+	firstTime = make(map[string]bool) 
+	inputAnswer = make(map[string]string)
+	proba = map[string][]string{
+		"wach chl7(a) ?" : {"mrkapl4n" , "KARIM" , "Kernel.rs" , "aka_bousta" , "h_a_n_a_n" , "Lynna" },
+		"chl7(a) o sakn 3la bra ?" : {"Kernel.rs"  , "KARIM" },
+		"pizza tafarnout ?" : {"KARIM"},
+		"chl7(a) o sakn finzegane ?" : {"mrkapl4n"},
+		"chl7(a) o sakn fagadir?" : {"aka_bousta" , "Lynna" , "h_a_n_a_n"},
+		"faux compte ?" : {"h_a_n_a_n"},
+		"la denya la akhira la 7awlawala9owatailbilah" : {"aka_bousta"},
+		"skayri(a) ?" : {"aka_bousta"},
+		"khona(tna) fhmator(a)? :" : {"Riquelme2.0"},
+		"khdam(a) b twitter ?" : {"Kernel.rs" , "mrkapl4n" ,"aka_bousta"  , "Lynna"},
+		"influencer(a) ftwitter ?" : {"Lynna"},
+		"tykhra ola ttkhra ftwitter ?" : {"aka_bousta"},
+		"3ndo twitter pro ?" : {"mrkapl4n" , "Kernel.rs"},
+		"awal 7aja tydirha mli tyfi9 hiya tytl 3la linkedin ?" : {"mrkapl4n"},
+		"tysm3 ola ttsm3 lmorphine" : {"mrkapl4n" , "Kernel.rs" , "Lynna"},
+		"7M7 ?" : {"Riquelme2.0"},
+		"tysm3 ola ttsm3 l Oudadn" : {"KARIM"},
+		"Tymot ola ttmot 3la seddam heussin ?" : {"shaxmax"},
+		"m3awd flbac ?" : {"aka_bousta" , "Bacharnaciri"},
+		"m3awd flbac mra w7da ?" : {"Bacharnaciri"},
+		"m3awd bzf flbac ?" : {"aka_bousta"},
+		"tyl3b minceraft ?" : {"aka_bousta" , "KARIM" , "shaxmax" , "XDXG" , "! Madara⭐✨" },
+		"tyl3b the finals ?"  : {"wolfmen" , "! Madara⭐✨"},
+		"tyl3b mta ?" : {"aka_bousta" },
+		"ty9ra ola tt9ra for fun hh" : {"Lynna"},
+		"khona ola khtna fhmator(a) ?" : {"Riquelme2.0"},
+		"tyl3b b bog3bob + neon ?" : {"Bacharnaciri"},
+		"tyl3B ola ttl3B league of legends 7achak ?" : {"Lynna" , "XDXG" },
+		"tyl3b valo ? madawich 3la hatba 7it ghi tykhra" : {"Kernel.rs" , "mrkapl4n" },
+		"tytfj fseriyat bzf ?" : {"mrk4plan"},
+		"ta7t liya souris ?" : {"Kernel.rs"},
+		"dildo ?" : {"XDXG"},
+		"3aych bra lmghrib ?" : {"XDXG" , "Kernel.rs" , "KARIM" , "shaxmax" },
+		"fr3 lina krna b compte epic ?" : {"Bacharnaciri"},
+		"bronze f valo ?" : {"mrkapl4n"},
+		"tydir azar ?" : {"! Madara⭐✨" , "aka_bousta" },
+		"azarat lmla7 ?" : {"! Madara⭐✨" },
+		"zefzafi v2 ?" : {"! Madara⭐✨"},
+		"mtykhrjch mn  geforece ?"  : {"wolfmen"},
+		"tygol hbibi bzf ?" : {"mrkapl4n" },
+		"9ari ola baghi i9ra fcmc ?" : {"mrkapl4n" , "aka_bousta" , "wolfmen"},
+		"9ra fcmc ?" : {"mrkapl4n" },
+		"baghi i9ra fcmc ?" : { "aka_bousta" , "wolfmen"},
+		"kayn amal i9bloh fcmc ?" : {"wolfmen"},
+		"7afd ga3 flags dyal dowal ?": {"XDXG"},
+		"Khdam fglovo ?" : {"! Madara⭐✨"},
+		"AI ghaydilih khdmto ?" : {"mrkapl4n" , "Kernel.rs"},
+	}
+	 LastReq  time.Time
+	 activeGames = make(map[string]*GameState)
+)
+
+type GameState struct {
+    CurrQ      string
+    RemCan  []string
+    AskedQ      []string
+    Score               map[string]int
+}
 
 
 func logMsg(lvl, m string) {
@@ -43,9 +108,166 @@ func logMsg(lvl, m string) {
 	log.Printf("%s%s[%s] %s\033[0m\n", color, t, lvl, m)
 }
 
+func loadData() {
+	f , err := os.Open("whitelist.json")
+	if err != nil {
+		logMsg("ERROR", fmt.Sprintf("Error opening whitelist.json: %v", err))
+		firstTime = make(map[string]bool)
+		return
+	}
+	defer f.Close()
+	r := json.NewDecoder(f)
+	if err := r.Decode(&firstTime) ; err != nil {
+		logMsg("ERROR", fmt.Sprintf("Error decoding whitelist.json: %v", err))
+		firstTime = make(map[string]bool)
+		return
+	}
+}
 
-var firstTime = make(map[string]bool) 
+func saveToJson() {
+	f , err := os.Create("whitelist.json")
+	if err != nil {
+		logMsg("ERROR", fmt.Sprintf("Error creating whitelist.json: %v", err))
+		return
+	}
+	defer f.Close()
+	w := json.NewEncoder(f) 
+	if err := w.Encode(firstTime) ; err != nil {
+		logMsg("ERROR", fmt.Sprintf("Error encoding whitelist.json: %v", err))
+		return
+	}
+}
 
+
+func startGame(s *discordgo.Session, m *discordgo.MessageCreate) {
+    gameState := &GameState{
+        RemCan: getAllCandidates(),
+        Score:              make(map[string]int),
+    }
+    activeGames[m.ChannelID] = gameState
+    nextQuestion := selectNextQuestion(gameState)
+    sendQuestion(s, m.ChannelID, nextQuestion)
+}
+
+func handleAnswer(s *discordgo.Session, m *discordgo.MessageCreate, answer string) {
+	gameState := activeGames[m.ChannelID]
+    if gameState == nil || gameState.CurrQ == "" {
+        logMsg("ERROR", "No active game or question found")
+        return
+    }
+    for _, candidate := range gameState.RemCan {
+        for question, validAnswers := range proba {
+            if question == gameState.CurrQ {
+                isValid := contains(validAnswers, candidate)
+                if (answer == "ah" && isValid) || (answer == "la" && !isValid) {
+                    gameState.Score[candidate]++
+                }
+            }
+        }
+    }
+
+    var newCandidates []string
+    maxScore := 0
+    for _, candidate := range gameState.RemCan {
+        if score := gameState.Score[candidate]; score >= maxScore {
+            if score > maxScore {
+                newCandidates = []string{candidate}
+                maxScore = score
+            } else {
+                newCandidates = append(newCandidates, candidate)
+            }
+        }
+    }
+    gameState.RemCan = newCandidates
+    if len(gameState.RemCan) == 1 || len(gameState.AskedQ) >= 10 {
+        sendResult(s, m.ChannelID, gameState)
+        delete(activeGames, m.ChannelID)
+        return
+    }
+
+    nextQuestion := selectNextQuestion(gameState)
+    sendQuestion(s, m.ChannelID, nextQuestion)
+}
+
+func selectNextQuestion(state *GameState) string {
+    if len(state.RemCan) == 0 {
+        return ""
+    }
+
+    bestQuestion := ""
+    bestSplit := 0.0
+
+    for question := range proba {
+        if contains(state.AskedQ, question) {
+            continue
+        }
+
+        validCount := 0
+        for _, candidate := range state.RemCan {
+            if contains(proba[question], candidate) {
+                validCount++
+            }
+        }
+
+        split := math.Abs(float64(validCount) - float64(len(state.RemCan))/2)
+        if bestQuestion == "" || split > bestSplit {
+            bestSplit = split
+            bestQuestion = question
+        }
+    }
+
+    if bestQuestion != "" {
+        state.CurrQ = bestQuestion
+        state.AskedQ = append(state.AskedQ, bestQuestion)
+    }
+    return bestQuestion
+}
+
+func getAllCandidates() []string {
+	arr := make(map[string]bool)
+    var c []string
+    for _, validAnswers := range proba {
+        for _, i := range validAnswers {
+            if !arr[i] {
+                arr[i] = true
+                c = append(c, i)
+            }
+        }
+    }
+    return c
+}
+
+func sendQuestion(s *discordgo.Session, channelID string, question string) {
+	embed := &discordgo.MessageEmbed{
+		Title: "Ait Akinator",
+		Description: question + "\n\n jawb b 'ah' or 'la'",
+		Color: 0x00FF00,
+	}
+	s.ChannelMessageSendEmbed(channelID, embed)
+}
+func sendResult(s *discordgo.Session, channelID string, state *GameState) {
+	var r string
+    if len(state.RemCan) == 1 {
+        r = " Howa ola machi howa : " + state.RemCan[0]
+    } else {
+        r = " AYkon ghi wa7d  min hado , hada jhdi : " + strings.Join(state.RemCan, ", ")
+    }
+    embed := &discordgo.MessageEmbed{
+        Title: "gheda gheda ",
+        Description: r,
+        Color: 0x00FF00,
+    }
+    s.ChannelMessageSendEmbed(channelID, embed)
+}
+
+func contains(slice []string, item string) bool {
+    for _, s := range slice {
+        if s == item {
+            return true
+        }
+    }
+    return false
+}
 
 
 func askGem(s *discordgo.Session, m *discordgo.MessageCreate, q string) string {
@@ -113,12 +335,26 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			} else {
 				logMsg("OK", fmt.Sprintf("Sent first-time embed message to user: %s", m.Author.Username))
 				firstTime[m.Author.ID] = true 
+				saveToJson()
 			}
 		}
 	}
 
 	args := strings.Split(m.Content, " ")
 	if args[0] == ai && len(args) > 1 {
+		if time.Since(LastReq) < 5*time.Second {
+			embed := &discordgo.MessageEmbed{
+				Title:       "Tsna a w9",
+				Description: "Wach baghi ty7ni , ra tnmil mtnti7ch",
+				Color : 0xFF0000,
+			}
+			_ , err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+			if err != nil {
+				logMsg("ERROR", fmt.Sprintf("Error sending message: %v", err))
+			}
+			return
+		}
+		LastReq = time.Now()
 		prompt := strings.Join(args[1:], " ")
 		response := askGem(s, m, prompt)
 		embed := &discordgo.MessageEmbed{
@@ -137,7 +373,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if args[0] == dh {
-		if args[1] == "latence" {
+
+ 		if args[1] == "latence" {
 			latency := s.HeartbeatLatency().Milliseconds()
 			author := &discordgo.MessageEmbedAuthor{
 				Name:    m.Author.Username,
@@ -158,11 +395,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			logMsg("OK", fmt.Sprintf("jawb  l  /dh latence command b : %d ms", latency))
 		}
 		if args[1] == "memes" {
-			// reques to  an ig acccount to store on an Dynamaic array : 
-			os.Create("..:")
+
 		}
-
-
 		if args[1] == "ls" {
 			channels, err := s.GuildChannels(m.GuildID)
 			if err != nil {
@@ -235,9 +469,20 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			logMsg("OK", fmt.Sprintf("Output path: %s", path))
 		}		
 	}
+	if args[0] == v {
+		if len(args) == 1 {
+			startGame(s, m)
+			return
+		}
+		answer := strings.ToLower(args[1])
+		if answer == "ah" || answer == "la" {
+			handleAnswer(s, m, answer)
+		}
+	}
 }
 
 func main() {
+	loadData()
 	godotenv.Load()
 	if godotenv.Load() != nil {
 		logMsg("ERROR", "Error loading .env file")
