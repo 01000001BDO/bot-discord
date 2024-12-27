@@ -17,6 +17,7 @@ primary_region = 'cdg'
   processes = ['app']
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 [[services]]
   protocol = 'tcp'
@@ -40,6 +41,8 @@ primary_region = 'cdg'
     soft_limit = 20
 
 >>>>>>> dcaf5d4 (feat: refactor Docker setup and enhance game logic with whitelist management 🐨)
+=======
+>>>>>>> origin/master
 [[vm]]
   memory = '2gb'
   cpu_kind = 'shared'

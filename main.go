@@ -20,7 +20,7 @@ import (
 const (
 	dh 		string 	= 	"/dh"
 	ai 		string 	= 	"/ai"
-	v string = 	"/ait-akinator"
+	v 		string  = 	"/ait-akinator"
 	dhPlay 	string 	= 	"/dh-play" 
 	RED 	string  = 	"\033[31m"
 	YELLOW 	string  = 	"\033[33m"
@@ -30,7 +30,6 @@ const (
 
 var (
 	firstTime = make(map[string]bool) 
-	inputAnswer = make(map[string]string)
 	proba = map[string][]string{
 		"wach chl7(a) ?" : {"mrkapl4n" , "KARIM" , "Kernel.rs" , "aka_bousta" , "h_a_n_a_n" , "Lynna" },
 		"chl7(a) o sakn 3la bra ?" : {"Kernel.rs"  , "KARIM" },
@@ -85,10 +84,10 @@ var (
 )
 
 type GameState struct {
-    CurrQ      string
-    RemCan  []string
+    CurrQ         string
+    RemCan      []string
     AskedQ      []string
-    Score               map[string]int
+    Score       map[string]int
 }
 
 
@@ -196,7 +195,6 @@ func selectNextQuestion(state *GameState) string {
 
     bestQuestion := ""
     bestSplit := 0.0
-
     for question := range proba {
         if contains(state.AskedQ, question) {
             continue
@@ -240,7 +238,7 @@ func getAllCandidates() []string {
 func sendQuestion(s *discordgo.Session, channelID string, question string) {
 	embed := &discordgo.MessageEmbed{
 		Title: "Ait Akinator",
-		Description: question + "\n\n jawb b 'ah' or 'la'",
+		Description: question + "\n\n jawb b **/ait-akinator ah** or **/ait-akinator la**",
 		Color: 0x00FF00,
 	}
 	s.ChannelMessageSendEmbed(channelID, embed)
@@ -248,12 +246,13 @@ func sendQuestion(s *discordgo.Session, channelID string, question string) {
 func sendResult(s *discordgo.Session, channelID string, state *GameState) {
 	var r string
     if len(state.RemCan) == 1 {
-        r = " Howa ola machi howa : " + state.RemCan[0]
+		r = "Howa ola machi howa: **@" + state.RemCan[0]+"**"
+
     } else {
-        r = " AYkon ghi wa7d  min hado , hada jhdi : " + strings.Join(state.RemCan, ", ")
+        r = " AYkon ghi wa7d  min hado , skill issues (probelem fl'arbre ) : " + strings.Join(state.RemCan, ", ")
     }
     embed := &discordgo.MessageEmbed{
-        Title: "gheda gheda ",
+        Title: "Ezzz Ezzz",
         Description: r,
         Color: 0x00FF00,
     }
