@@ -3,48 +3,30 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'bot-ds'
-primary_region = 'cdg'
+app = "bot-ds"
+primary_region = "ams"
+kill_signal = "SIGINT"
+kill_timeout = "5s"
 
-[build]
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
-  min_machines_running = 0
-  processes = ['app']
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
 [[services]]
-  protocol = 'tcp'
+  protocol = "tcp"
   internal_port = 8080
-
+  auto_stop_machines = true
   auto_start_machines = true
   min_machines_running = 1
+  http_checks = []  # You might want to define health checks here if necessary
+  tcp_checks = []   # Same as above, define checks if needed
 
   [[services.ports]]
     port = 80
-    handlers = ['http']
+    handlers = ["http"]
     force_https = true
 
   [[services.ports]]
     port = 443
-    handlers = ['tls', 'http']
+    handlers = ["tls", "http"]
 
   [services.concurrency]
-    type = 'connections'
+    type = "connections"
     hard_limit = 25
     soft_limit = 20
-
->>>>>>> dcaf5d4 (feat: refactor Docker setup and enhance game logic with whitelist management 🐨)
-=======
->>>>>>> origin/master
-[[vm]]
-  memory = '2gb'
-  cpu_kind = 'shared'
-  cpus = 2
-  memory_mb = 2048
