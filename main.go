@@ -686,13 +686,13 @@ func handleTTS(s *discordgo.Session, m *discordgo.MessageCreate, text string) {
         currentActivity := voiceManager.GetCurrentActivity(m.GuildID)
         var message string
         if currentActivity == MusicPlaying {
-            message = "Bot déjà kaykhdm mzika, tsna hta ysali"
+            message = "Bot mkhdm mzika, tsna hta ysali"
         } else {
-            message = "Bot déjà kayhddr, tsna hta ysali"
+            message = "Bot  tydwi , tsna hta ysali"
         }
         
         embed := &discordgo.MessageEmbed{
-            Title: "Chi 7aja trat !!!",
+            Title: "3a9o bika !!!",
             Description: message,
             Color: 0xFF0000,
         }
