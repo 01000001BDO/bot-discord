@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/joho/godotenv"
@@ -406,7 +409,17 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
     player.mu.Lock()
     defer player.mu.Unlock()
 
-    video, err := yt.GetVideo(url)
+	client := youtube.Client{
+        HTTPClient: &http.Client{
+            Transport: &http.Transport{
+                TLSClientConfig: &tls.Config{
+                    InsecureSkipVerify: true,
+                },
+            },
+        },
+    }
+	
+	video, err := client.GetVideo(url)
     if err != nil {
         voiceManager.ClearActivity(m.GuildID, MusicPlaying)
         embed := &discordgo.MessageEmbed{
