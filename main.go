@@ -406,28 +406,29 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-	
-	videoID := extractVideoID(url)
-    if videoID == "" {
-        embed := &discordgo.MessageEmbed{
-            Title: "Chi 7aja trat !!!",
-            Description: "Invalid YouTube URL",
-            Color: 0xFF0000,
+    cmd := exec.Command("ffmpeg", "-i", url)
+    output, _ := cmd.CombinedOutput()
+    outputStr := string(output)
+    title := "YouTube Video"
+    duration := "Unknown"
+    
+    if strings.Contains(outputStr, "title") {
+        titleStart := strings.Index(outputStr, "title")
+        if titleStart != -1 {
+            title = outputStr[titleStart:strings.Index(outputStr, "\n")]
         }
-        s.ChannelMessageSendEmbed(m.ChannelID, embed)
-        return
     }
-	streamURL := fmt.Sprintf("https://invidious.projectsegfault.net/latest_version?id=%s&itag=251", videoID)
     song := Song{
-        URL:      streamURL,
-        Title:    "YouTube Video", 
-        Duration: "Unknown",       
-    } 
+        URL:      url,
+        Title:    title,
+        Duration: duration,
+    }
+    
     player.queue = append(player.queue, song)
     
     embed := &discordgo.MessageEmbed{
         Title: "Jdid fl Queue",
-        Description: fmt.Sprintf("🎵 **%s**", song.Title),
+        Description: fmt.Sprintf("🎵 **%s**\n⏱️ Duration: %s", song.Title, song.Duration),
         Color: 0x00FF00,
         Footer: &discordgo.MessageEmbedFooter{
             Text: "Added by " + m.Author.Username,
@@ -458,6 +459,7 @@ func extractVideoID(url string) string {
     return ""
 }
 
+
 func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, player *MusicPlayer) {
     defer voiceManager.ClearActivity(guildID, MusicPlaying)
     
@@ -469,114 +471,94 @@ func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, p
     player.isPlaying = true
     player.mu.Unlock()
 
-	for {
-		player.mu.Lock()
-		if len(player.queue) == 0 {
-			player.isPlaying = false
-			if player.voiceConn != nil {
-				player.voiceConn.Disconnect()
-				player.voiceConn = nil
-			}
-			embed := &discordgo.MessageEmbed{
-				Title:       "Queue Finished",
-				Description: "📭 Queue khawya, zid chi 7aja akhora",
-				Color:       0x00FF00,
-			}
-			s.ChannelMessageSendEmbed(voiceChannelID, embed)
-			player.mu.Unlock()
-			return
-		}
+    for {
+        player.mu.Lock()
+        if len(player.queue) == 0 {
+            player.isPlaying = false
+            if player.voiceConn != nil {
+                player.voiceConn.Disconnect()
+                player.voiceConn = nil
+            }
+            embed := &discordgo.MessageEmbed{
+                Title:       "Queue Finished",
+                Description: "📭 Queue khawya, zid chi 7aja akhora",
+                Color:       0x00FF00,
+            }
+            s.ChannelMessageSendEmbed(voiceChannelID, embed)
+            player.mu.Unlock()
+            return
+        }
 
-		currentSong := player.queue[0]
-		player.queue = player.queue[1:]
-		player.mu.Unlock()
-		if player.voiceConn == nil {
-			vc, err := joinVoiceChannel(s, guildID, voiceChannelID)
-			if err != nil {
-				continue
-			}
-			player.voiceConn = vc
-		}
-		embed := &discordgo.MessageEmbed{
-			Title:       "Sm3 Sm3 🎵",
-			Description: fmt.Sprintf("**%s**\n⏱️ Duration: %s", currentSong.Title, currentSong.Duration),
-			Color:       0x00FF00,
-		}
-		s.ChannelMessageSendEmbed(voiceChannelID, embed)
+        currentSong := player.queue[0]
+        player.queue = player.queue[1:]
+        player.mu.Unlock()
 
-		video, err := yt.GetVideo(currentSong.URL)
-		if err != nil {
-			continue
-		}
+        if player.voiceConn == nil {
+            vc, err := joinVoiceChannel(s, guildID, voiceChannelID)
+            if err != nil {
+                continue
+            }
+            player.voiceConn = vc
+        }
 
-		formats := video.Formats.WithAudioChannels()
-		stream, _, err := yt.GetStream(video, &formats[0])
-		if err != nil {
-			continue
-		}
+        ffmpeg := exec.Command("ffmpeg",
+            "-i", currentSong.URL,
+            "-f", "s16le",
+            "-ar", "48000",
+            "-ac", "2",
+            "-loglevel", "warning",
+            "pipe:1")
 
-		ffmpeg := exec.Command("ffmpeg", "-i", "pipe:0", "-f", "s16le", "-ar", "48000", "-ac", "2", "pipe:1")
-		ffmpeg.Stdin = stream
-		stdout, err := ffmpeg.StdoutPipe()
-		if err != nil {
-			continue
-		}
+        stdout, err := ffmpeg.StdoutPipe()
+        if err != nil {
+            continue
+        }
 
-		err = ffmpeg.Start()
-		if err != nil {
-			continue
-		}
-		encoder, err := gopus.NewEncoder(frameRate, channels, gopus.Audio)
-		if err != nil {
-			continue
-		}
-		finished := make(chan bool)
-		interrupt := make(chan bool)
-		go func() {
-			defer func() {
-				ffmpeg.Process.Kill()
-				close(finished)
-			}()
+        err = ffmpeg.Start()
+        if err != nil {
+            continue
+        }
 
-			buffer := make([]int16, frameSize*channels)
-			for {
-				select {
-				case <-player.stopChan:
-					return
-				case <-interrupt:
-					return
-				default:
-					err := binary.Read(stdout, binary.LittleEndian, &buffer)
-					if err != nil {
-						if err == io.EOF {
-							return
-						}
-						fmt.Println("Error reading from ffmpeg stdout:", err)
-						return
-					}
-					opus, err := encoder.Encode(buffer, frameSize, frameSize*2)
-					if err != nil {
-						fmt.Println("Error encoding to Opus:", err)
-						return
-					}
-					select {
-					case player.voiceConn.OpusSend <- opus:
-					case <-player.stopChan:
-						return
-					case <-interrupt:
-						return
-					}
-				}
-			}
-		}()
-		select {
-		case <-finished:
-			time.Sleep(500 * time.Millisecond)
-		case <-player.stopChan:
-			close(interrupt)
-			player.stopChan = make(chan bool)
-		}
-	}
+        encoder, err := gopus.NewEncoder(frameRate, channels, gopus.Audio)
+        if err != nil {
+            continue
+        }
+
+        embed := &discordgo.MessageEmbed{
+            Title:       "Sm3 Sm3 🎵",
+            Description: fmt.Sprintf("**%s**\n⏱️ Duration: %s", currentSong.Title, currentSong.Duration),
+            Color:       0x00FF00,
+        }
+        s.ChannelMessageSendEmbed(voiceChannelID, embed)
+
+        buffer := make([]int16, frameSize*channels)
+        for {
+            err := binary.Read(stdout, binary.LittleEndian, &buffer)
+            if err == io.EOF || err == io.ErrUnexpectedEOF {
+                break
+            }
+            if err != nil {
+                fmt.Println("Error reading from ffmpeg stdout:", err)
+                break
+            }
+
+            opus, err := encoder.Encode(buffer, frameSize, frameSize*2)
+            if err != nil {
+                fmt.Println("Error encoding to opus:", err)
+                break
+            }
+
+            select {
+            case player.voiceConn.OpusSend <- opus:
+            case <-player.stopChan:
+                ffmpeg.Process.Kill()
+                return
+            }
+        }
+        
+        ffmpeg.Process.Kill()
+        time.Sleep(200 * time.Millisecond)
+    }
 }
 
 func handleSkip(s *discordgo.Session, m *discordgo.MessageCreate, player *MusicPlayer) {
