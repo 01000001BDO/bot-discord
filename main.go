@@ -406,11 +406,13 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-    cmd := exec.Command("yt-dlp", "-j", 
+	cmd := exec.Command("yt-dlp", "-j",
+    "-f", "bestaudio",
+    "--extract-audio",
     "--no-check-certificates",
-    "--ignore-errors", 
     "--no-playlist",
-    "--extractor-args", "youtube:player_client=android",
+    "--user-agent", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    "--extractor-args", "youtube:player_client=android,ios",
     url)
     output, err := cmd.CombinedOutput() 
     if err != nil {
