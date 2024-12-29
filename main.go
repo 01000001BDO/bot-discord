@@ -406,43 +406,28 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-	cmd := exec.Command("yt-dlp", "-j",
-    "-f", "bestaudio[ext=m4a]",
-    "--no-check-certificates",
-    "--no-playlist",
-    "--user-agent", "com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip",
-    "--extractor-args", "youtube:player_client=android",
-    url)
-    output, err := cmd.CombinedOutput() 
-    if err != nil {
-        voiceManager.ClearActivity(m.GuildID, MusicPlaying)
+	
+	videoID := extractVideoID(url)
+    if videoID == "" {
         embed := &discordgo.MessageEmbed{
             Title: "Chi 7aja trat !!!",
-            Description: fmt.Sprintf("Error ma9drtch njib video: %v\nOutput: %s", err, string(output)), 
+            Description: "Invalid YouTube URL",
             Color: 0xFF0000,
         }
         s.ChannelMessageSendEmbed(m.ChannelID, embed)
         return
     }
-
-    var videoInfo struct {
-        Title    string `json:"title"`
-        Duration int    `json:"duration"`
-    }
-    if err := json.Unmarshal(output, &videoInfo); err != nil {
-        return
-    }
-
+	streamURL := fmt.Sprintf("https://invidious.projectsegfault.net/latest_version?id=%s&itag=251", videoID)
     song := Song{
-        URL:      url,
-        Title:    videoInfo.Title,
-        Duration: fmt.Sprintf("%d:%02d", videoInfo.Duration/60, videoInfo.Duration%60),
-    }
+        URL:      streamURL,
+        Title:    "YouTube Video", 
+        Duration: "Unknown",       
+    } 
     player.queue = append(player.queue, song)
     
     embed := &discordgo.MessageEmbed{
         Title: "Jdid fl Queue",
-        Description: fmt.Sprintf("🎵 **%s**\n⏱️ Duration: %s", song.Title, song.Duration),
+        Description: fmt.Sprintf("🎵 **%s**", song.Title),
         Color: 0x00FF00,
         Footer: &discordgo.MessageEmbedFooter{
             Text: "Added by " + m.Author.Username,
@@ -455,6 +440,24 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
         go startPlaying(s, m.GuildID, voiceChannelID, player)
     }
 }
+
+func extractVideoID(url string) string {
+    if strings.Contains(url, "youtube.com/watch?v=") {
+        parts := strings.Split(url, "v=")
+        if len(parts) == 2 {
+            return strings.Split(parts[1], "&")[0]
+        }
+    }
+    if strings.Contains(url, "youtu.be/") {
+        parts := strings.Split(url, "youtu.be/")
+        if len(parts) == 2 {
+            return strings.Split(parts[1], "?")[0]
+        }
+    }
+    
+    return ""
+}
+
 func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, player *MusicPlayer) {
     defer voiceManager.ClearActivity(guildID, MusicPlaying)
     
