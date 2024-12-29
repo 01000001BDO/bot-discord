@@ -406,57 +406,68 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-    cmd := exec.Command("ffmpeg", "-i", url)
-    output, _ := cmd.CombinedOutput()
-    outputStr := string(output)
-    title := "YouTube Video"
-    duration := "Unknown"
-    
-    if strings.Contains(outputStr, "title") {
-        titleStart := strings.Index(outputStr, "title")
-        if titleStart != -1 {
-            title = outputStr[titleStart:strings.Index(outputStr, "\n")]
-        }
-    }
-    song := Song{
-        URL:      url,
-        Title:    title,
-        Duration: duration,
-    }
-    
-    player.queue = append(player.queue, song)
-    
-    embed := &discordgo.MessageEmbed{
-        Title: "Jdid fl Queue",
-        Description: fmt.Sprintf("🎵 **%s**\n⏱️ Duration: %s", song.Title, song.Duration),
-        Color: 0x00FF00,
-        Footer: &discordgo.MessageEmbedFooter{
-            Text: "Added by " + m.Author.Username,
-            IconURL: m.Author.AvatarURL(""),
-        },
-    }
-    s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	cmd := exec.Command("yt-dlp",
+	"--format", "bestaudio",
+	"--get-url",
+	"--no-playlist",
+	"--no-warnings",
+	"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+	url)
 
-    if !player.isPlaying {
-        go startPlaying(s, m.GuildID, voiceChannelID, player)
-    }
+audioURL, err := cmd.Output()
+if err != nil {
+	voiceManager.ClearActivity(m.GuildID, MusicPlaying)
+	embed := &discordgo.MessageEmbed{
+		Title: "Chi 7aja trat !!!",
+		Description: fmt.Sprintf("Error ma9drtch njib video: %v", err),
+		Color: 0xFF0000,
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+	return
 }
 
-func extractVideoID(url string) string {
-    if strings.Contains(url, "youtube.com/watch?v=") {
-        parts := strings.Split(url, "v=")
-        if len(parts) == 2 {
-            return strings.Split(parts[1], "&")[0]
-        }
-    }
-    if strings.Contains(url, "youtu.be/") {
-        parts := strings.Split(url, "youtu.be/")
-        if len(parts) == 2 {
-            return strings.Split(parts[1], "?")[0]
-        }
-    }
-    
-    return ""
+	// Get video info
+	infoCmd := exec.Command("yt-dlp",
+		"--get-title",
+		"--get-duration",
+		"--no-playlist",
+		"--no-warnings",
+		url)
+
+	info, err := infoCmd.Output()
+	if err != nil {
+		info = []byte("Unknown\nUnknown")
+	}
+
+	infoLines := strings.Split(string(info), "\n")
+	title := "Unknown"
+	duration := "Unknown"
+	if len(infoLines) >= 2 {
+		title = infoLines[0]
+		duration = infoLines[1]
+	}
+
+	song := Song{
+		URL:      strings.TrimSpace(string(audioURL)),
+		Title:    title,
+		Duration: duration,
+	}
+	player.queue = append(player.queue, song)
+
+	embed := &discordgo.MessageEmbed{
+		Title: "Jdid fl Queue",
+		Description: fmt.Sprintf("🎵 **%s**\n⏱️ Duration: %s", song.Title, song.Duration),
+		Color: 0x00FF00,
+		Footer: &discordgo.MessageEmbedFooter{
+			Text: "Added by " + m.Author.Username,
+			IconURL: m.Author.AvatarURL(""),
+		},
+	}
+	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+
+	if !player.isPlaying {
+		go startPlaying(s, m.GuildID, voiceChannelID, player)
+}
 }
 
 
