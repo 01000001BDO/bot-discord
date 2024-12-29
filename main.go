@@ -407,17 +407,18 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
     player.mu.Lock()
     defer player.mu.Unlock()
     cmd := exec.Command("yt-dlp", "-j", url)
-    output, err := cmd.Output()
+    output, err := cmd.CombinedOutput() 
     if err != nil {
         voiceManager.ClearActivity(m.GuildID, MusicPlaying)
         embed := &discordgo.MessageEmbed{
             Title: "Chi 7aja trat !!!",
-            Description: "Error ma9drtch njib video: " + err.Error(),
+            Description: fmt.Sprintf("Error ma9drtch njib video: %v\nOutput: %s", err, string(output)), 
             Color: 0xFF0000,
         }
         s.ChannelMessageSendEmbed(m.ChannelID, embed)
         return
     }
+
     var videoInfo struct {
         Title    string `json:"title"`
         Duration int    `json:"duration"`
@@ -425,6 +426,7 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
     if err := json.Unmarshal(output, &videoInfo); err != nil {
         return
     }
+
     song := Song{
         URL:      url,
         Title:    videoInfo.Title,
