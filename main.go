@@ -394,7 +394,7 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
         } else {
             message = "bot mkhdm mzika, tsna hta ysali"
         }
-        
+       
         embed := &discordgo.MessageEmbed{
             Title: "3a9o bika",
             Description: message,
@@ -406,68 +406,71 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-	cmd := exec.Command("yt-dlp",
-	"--format", "bestaudio",
-	"--get-url",
-	"--no-playlist",
-	"--no-warnings",
-	"--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-	url)
 
-audioURL, err := cmd.Output()
-if err != nil {
-	voiceManager.ClearActivity(m.GuildID, MusicPlaying)
-	embed := &discordgo.MessageEmbed{
-		Title: "Chi 7aja trat !!!",
-		Description: fmt.Sprintf("Error ma9drtch njib video: %v", err),
-		Color: 0xFF0000,
-	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
-	return
-}
+    // Get direct audio URL
+    cmd := exec.Command("yt-dlp",
+        "--verbose",
+        "--format", "bestaudio",
+        "--get-url",
+        "--no-playlist",
+        "--no-warnings",
+        url)
+    
+    audioURL, err := cmd.CombinedOutput()  
+    if err != nil {
+        voiceManager.ClearActivity(m.GuildID, MusicPlaying)
+        embed := &discordgo.MessageEmbed{
+            Title: "Chi 7aja trat !!!",
+            Description: fmt.Sprintf("Error ma9drtch njib video: %v\nOutput: %s", err, string(audioURL)),
+            Color: 0xFF0000,
+        }
+        s.ChannelMessageSendEmbed(m.ChannelID, embed)
+        return
+    }
 
-	// Get video info
-	infoCmd := exec.Command("yt-dlp",
-		"--get-title",
-		"--get-duration",
-		"--no-playlist",
-		"--no-warnings",
-		url)
+    // Get video info
+    infoCmd := exec.Command("yt-dlp",
+        "--get-title",
+        "--get-duration",
+        "--no-playlist",
+        "--no-warnings",
+        url)
+    
+    info, err := infoCmd.Output()
+    if err != nil {
+        info = []byte("Unknown\nUnknown")
+    }
 
-	info, err := infoCmd.Output()
-	if err != nil {
-		info = []byte("Unknown\nUnknown")
-	}
+    infoLines := strings.Split(string(info), "\n")
+    title := "Unknown"
+    duration := "Unknown"
+    if len(infoLines) >= 2 {
+        title = infoLines[0]
+        duration = infoLines[1]
+    }
 
-	infoLines := strings.Split(string(info), "\n")
-	title := "Unknown"
-	duration := "Unknown"
-	if len(infoLines) >= 2 {
-		title = infoLines[0]
-		duration = infoLines[1]
-	}
+    song := Song{
+        URL:      strings.TrimSpace(string(audioURL)), 
+        Title:    title,
+        Duration: duration,
+    }
+    
+    player.queue = append(player.queue, song)
+    
+    embed := &discordgo.MessageEmbed{
+        Title: "Jdid fl Queue",
+        Description: fmt.Sprintf("🎵 **%s**\n⏱️ Duration: %s", song.Title, song.Duration),
+        Color: 0x00FF00,
+        Footer: &discordgo.MessageEmbedFooter{
+            Text: "Added by " + m.Author.Username,
+            IconURL: m.Author.AvatarURL(""),
+        },
+    }
+    s.ChannelMessageSendEmbed(m.ChannelID, embed)
 
-	song := Song{
-		URL:      strings.TrimSpace(string(audioURL)),
-		Title:    title,
-		Duration: duration,
-	}
-	player.queue = append(player.queue, song)
-
-	embed := &discordgo.MessageEmbed{
-		Title: "Jdid fl Queue",
-		Description: fmt.Sprintf("🎵 **%s**\n⏱️ Duration: %s", song.Title, song.Duration),
-		Color: 0x00FF00,
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: "Added by " + m.Author.Username,
-			IconURL: m.Author.AvatarURL(""),
-		},
-	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
-
-	if !player.isPlaying {
-		go startPlaying(s, m.GuildID, voiceChannelID, player)
-}
+    if !player.isPlaying {
+        go startPlaying(s, m.GuildID, voiceChannelID, player)
+    }
 }
 
 
