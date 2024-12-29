@@ -406,7 +406,12 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-    cmd := exec.Command("yt-dlp", "-j", url)
+    cmd := exec.Command("yt-dlp", "-j", 
+    "--no-check-certificates",
+    "--ignore-errors", 
+    "--no-playlist",
+    "--extractor-args", "youtube:player_client=android",
+    url)
     output, err := cmd.CombinedOutput() 
     if err != nil {
         voiceManager.ClearActivity(m.GuildID, MusicPlaying)
