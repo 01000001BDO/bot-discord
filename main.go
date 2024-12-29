@@ -407,12 +407,11 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
     player.mu.Lock()
     defer player.mu.Unlock()
 	cmd := exec.Command("yt-dlp", "-j",
-    "-f", "bestaudio",
-    "--extract-audio",
+    "-f", "bestaudio[ext=m4a]",
     "--no-check-certificates",
     "--no-playlist",
-    "--user-agent", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-    "--extractor-args", "youtube:player_client=android,ios",
+    "--user-agent", "com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip",
+    "--extractor-args", "youtube:player_client=android",
     url)
     output, err := cmd.CombinedOutput() 
     if err != nil {
