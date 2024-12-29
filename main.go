@@ -408,8 +408,7 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-
-	client := youtube.Client{
+    client := youtube.Client{
         HTTPClient: &http.Client{
             Transport: &http.Transport{
                 TLSClientConfig: &tls.Config{
@@ -418,8 +417,8 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
             },
         },
     }
-	
-	video, err := client.GetVideo(url)
+
+    video, err := client.GetVideo(url)
     if err != nil {
         voiceManager.ClearActivity(m.GuildID, MusicPlaying)
         embed := &discordgo.MessageEmbed{
@@ -453,7 +452,6 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
         go startPlaying(s, m.GuildID, voiceChannelID, player)
     }
 }
-
 func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, player *MusicPlayer) {
     defer voiceManager.ClearActivity(guildID, MusicPlaying)
     
