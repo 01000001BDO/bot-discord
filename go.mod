@@ -10,6 +10,15 @@ require (
 )
 
 require (
+	github.com/PuerkitoBio/goquery v1.4.1 // indirect
+	github.com/andybalholm/cascadia v1.0.0 // indirect
+	github.com/gosimple/slug v1.2.0 // indirect
+	github.com/jonas747/dca v0.0.0-20210930103944-155f5e5f0cc7 // indirect
+	github.com/jonas747/ogg v0.0.0-20161220051205-b4f6f4cf3757 // indirect
+	github.com/rainycape/unidecode v0.0.0-20150907023854-cb7f23ec59be // indirect
+)
+
+require (
 	cloud.google.com/go v0.115.0 // indirect
 	cloud.google.com/go/ai v0.8.0 // indirect
 	cloud.google.com/go/auth v0.6.0 // indirect
@@ -34,6 +43,7 @@ require (
 	github.com/googleapis/gax-go/v2 v2.12.5 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/kkdai/youtube/v2 v2.10.2 // indirect
+	github.com/rhnvrm/lyric-api-go v0.1.4
 	github.com/stretchr/testify v1.10.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.51.0 // indirect

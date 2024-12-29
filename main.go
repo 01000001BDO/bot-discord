@@ -5,22 +5,23 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/bwmarrin/discordgo"
-	"github.com/google/generative-ai-go/genai"
-	"github.com/joho/godotenv"
-	"google.golang.org/api/option"
 	"io"
 	"log"
 	"math"
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-	//"github.com/bwmarrin/dgvoice"
+	"github.com/bwmarrin/discordgo"
+	"github.com/google/generative-ai-go/genai"
+	"github.com/joho/godotenv"
 	"github.com/kkdai/youtube/v2"
+	"google.golang.org/api/option"
 	"layeh.com/gopus"
 )
 
@@ -28,6 +29,8 @@ const (
 	dh         string        = "/dh"
 	ai         string        = "/ai"
 	v          string        = "/ait-akinator"
+	valoPing   string        = "/dh valo-ping"
+	morphineCmd string 		 = "/dh lmorphine"
 	RED        string        = "\033[31m"
 	YELLOW     string        = "\033[33m"
 	BLUE       string        = "\033[34m"
@@ -39,7 +42,6 @@ const (
 	MusicPlaying
 	TTSPlaying
 )
-
 var (
 	firstTime = make(map[string]bool)
 	proba     = map[string][]string{
@@ -98,6 +100,14 @@ var (
     voiceManager = &VoiceStateManager{
         guildStates: make(map[string]*GuildVoiceState),
     }
+	valorantServers = []ValorantServer{
+		{Name: "EU Frankfurt 1", IP: "35.198.119.251", Location: "Frankfurt, Germany"},
+		{Name: "EU Frankfurt 2", IP: "35.198.119.252", Location: "Frankfurt, Germany"},
+		{Name: "EU Paris", IP: "35.198.119.253", Location: "Paris, France"},
+		{Name: "EU London", IP: "35.198.119.254", Location: "London, UK"},
+		{Name: "EU Stockholm", IP: "35.198.119.255", Location: "Stockholm, Sweden"},
+		{Name: "EU Warsaw", IP: "35.198.119.250", Location: "Warsaw, Poland"},
+	}
 )
 
 type VoiceActivity int
@@ -131,6 +141,16 @@ type VoiceStateManager struct {
 	guildStates map[string]*GuildVoiceState
 	mu          sync.RWMutex
 }
+
+type ValorantServer struct {
+    Name     string
+    IP       string
+    Location string
+}
+
+
+
+
 func logMsg(lvl, m string) {
 	t := time.Now()
 	color := ""
@@ -236,6 +256,92 @@ func getOrCreatePlayer(guildID string) *MusicPlayer {
 	return player
 }
 
+func handlePing(s *discordgo.Session, m *discordgo.MessageCreate) {
+    if !strings.HasPrefix(m.Content, valoPing) {
+        return
+    }
+    embed := &discordgo.MessageEmbed{
+        Title:       "🔍 Omoro ta7dot ",
+        Description: "tsna wa7d chwiya , l omor ta7dot",
+        Color:       0x00FF00,
+    }
+    msg, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    if err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error sending initial message: %v", err))
+        return
+    }
+
+    type PingResult struct {
+        Name     string  `json:"name"`
+        Location string  `json:"location"`
+        Ping     float64 `json:"ping"`
+    }
+    var results []PingResult
+
+    for _, server := range valorantServers {
+        cmd := exec.Command("ping", "-c", "3", server.IP)
+        output, err := cmd.CombinedOutput()
+        var pingTime float64
+        if err != nil {
+            pingTime = 999
+        } else {
+            outputStr := string(output)
+            re := regexp.MustCompile(`time=(\d+\.?\d*)`)
+            matches := re.FindAllStringSubmatch(outputStr, -1)
+            
+            if len(matches) > 0 {
+                var total float64
+                count := 0
+                for _, match := range matches {
+                    if len(match) > 1 {
+                        if val, err := strconv.ParseFloat(match[1], 64); err == nil {
+                            total += val
+                            count++
+                        }
+                    }
+                }
+                if count > 0 {
+                    pingTime = total / float64(count)
+                }
+            }
+        }
+
+        results = append(results, PingResult{
+            Name:     server.Name,
+            Location: server.Location,
+            Ping:     math.Round(pingTime*100) / 100,
+        })
+    }
+
+    embed = &discordgo.MessageEmbed{
+        Title:       "🌐 Valorant EU Server Pings",
+        Description: "Lpingat lmla7:",
+        Color:       0x00FF00,
+        Fields:      make([]*discordgo.MessageEmbedField, 0),
+    }
+
+    for _, result := range results {
+        pingStatus := "🟢" 
+        if result.Ping > 100 {
+            pingStatus = "🔴" 
+        } else if result.Ping > 50 {
+            pingStatus = "🟡" 
+        }
+
+        embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
+            Name:   fmt.Sprintf("%s %s", pingStatus, result.Name),
+            Value:  fmt.Sprintf("```\nLocation: %s\nPing: %.2fms\n```", result.Location, result.Ping),
+            Inline: true,
+        })
+    }
+    _, err = s.ChannelMessageEditEmbed(m.ChannelID, msg.ID, embed)
+    if err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error updating ping message: %v", err))
+    }
+}
+
+
+
 func handleMusic(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
 	if len(args) < 2 {
 		s.ChannelMessageSend(m.ChannelID, "Please provide a command: play, skip, stop, queue")
@@ -334,8 +440,6 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
         go startPlaying(s, m.GuildID, voiceChannelID, player)
     }
 }
-
-
 
 func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, player *MusicPlayer) {
     defer voiceManager.ClearActivity(guildID, MusicPlaying)
@@ -740,12 +844,12 @@ func handleTTS(s *discordgo.Session, m *discordgo.MessageCreate, text string) {
 	defer os.Remove(tempFile.Name())
 	tempFile.Close()
 	espeakCmd := exec.Command("espeak",
-		"-v", "en-us+m1",
-		"-s", "170",
-		"-p", "50",
-		"-a", "200",
-		"-g", "5",
-		"-k", "5",
+		"-v", "fr+f2",     
+		"-s", "150",       
+		"-p", "60",      
+		"-a", "200",       	
+		"-g", "10",       
+		"-k", "5",         
 		"-w", tempFile.Name(),
 		text,
 	)
@@ -813,6 +917,45 @@ func playAudioFile(vc *discordgo.VoiceConnection, filename string) error {
 	}
 }
 
+func handleClearChat(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
+    if len(args) < 3 {
+        s.ChannelMessageSend(m.ChannelID, "Khoya wach 7mar, zid chi number dyal messages li baghi tmsa7. ex: `/dh clear [number]`")
+        return
+    }
+    num, err := strconv.Atoi(args[2])
+    if err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error converting argument to integer: %v", err))
+        s.ChannelMessageSend(m.ChannelID, "Khoya wach 7mar, khsk tdkhl wa7d number li howa positif o appartient à N (int).")
+        return
+    }
+    if num <= 0 {
+        s.ChannelMessageSend(m.ChannelID, "Khoya wach 7mar, khsk tdkhl wa7d number li howa positif o appartient à N (int).")
+        return
+    }
+
+    if num > 100 {
+        s.ChannelMessageSend(m.ChannelID, "Ma ymknch tmsa7 ktr mn 100 message f mra .")
+        return
+    }
+    messages, err := s.ChannelMessages(m.ChannelID, num+1, "", "", "")
+    if err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error retrieving messages: %v", err))
+        return
+    }
+    var messageIDs []string
+    for _, message := range messages {
+        if message.ID != m.ID {
+            messageIDs = append(messageIDs, message.ID)
+        }
+    }
+    logMsg("INFO", fmt.Sprintf("Deleting %d messages", len(messageIDs)))
+    err = s.ChannelMessagesBulkDelete(m.ChannelID, messageIDs)
+    if err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error deleting messages: %v", err))
+        return
+    }
+    s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Msa7t %d dyal messages.", len(messageIDs)))
+}
 func askGem(s *discordgo.Session, m *discordgo.MessageCreate, q string) string {
 	s.ChannelTyping(m.ChannelID)
 	ctx := context.Background()
@@ -895,6 +1038,12 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 		}
 	}
+
+	if strings.HasPrefix(m.Content, valoPing) {
+        handlePing(s, m)
+        return
+    }
+
 	args := strings.Split(m.Content, " ")
 	if args[0] == ai && len(args) > 1 {
 		if time.Since(LastReq) < 5*time.Second {
@@ -1035,6 +1184,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 			text := strings.Join(args[2:], " ")
 			handleTTS(s, m, text)
+			return
+		}
+		if args[1] == "clear" {
+			handleClearChat(s, m, args)
 			return
 		}
 	}
