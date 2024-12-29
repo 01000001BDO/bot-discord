@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -408,17 +406,8 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
 
     player.mu.Lock()
     defer player.mu.Unlock()
-    client := youtube.Client{
-        HTTPClient: &http.Client{
-            Transport: &http.Transport{
-                TLSClientConfig: &tls.Config{
-                    InsecureSkipVerify: true,
-                },
-            },
-        },
-    }
-
-    video, err := client.GetVideo(url)
+    cmd := exec.Command("yt-dlp", "-j", url)
+    output, err := cmd.Output()
     if err != nil {
         voiceManager.ClearActivity(m.GuildID, MusicPlaying)
         embed := &discordgo.MessageEmbed{
@@ -429,11 +418,17 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
         s.ChannelMessageSendEmbed(m.ChannelID, embed)
         return
     }
-
+    var videoInfo struct {
+        Title    string `json:"title"`
+        Duration int    `json:"duration"`
+    }
+    if err := json.Unmarshal(output, &videoInfo); err != nil {
+        return
+    }
     song := Song{
         URL:      url,
-        Title:    video.Title,
-        Duration: video.Duration.String(),
+        Title:    videoInfo.Title,
+        Duration: fmt.Sprintf("%d:%02d", videoInfo.Duration/60, videoInfo.Duration%60),
     }
     player.queue = append(player.queue, song)
     
