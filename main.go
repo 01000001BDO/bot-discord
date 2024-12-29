@@ -17,13 +17,13 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
 	"github.com/bwmarrin/discordgo"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/joho/godotenv"
 	"github.com/kkdai/youtube/v2"
 	"google.golang.org/api/option"
 	"layeh.com/gopus"
+	"github.com/hraban/opus"
 )
 
 const (
@@ -388,17 +388,15 @@ func handleMusic(s *discordgo.Session, m *discordgo.MessageCreate, args []string
 func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID string, url string, player *MusicPlayer) {
     if !voiceManager.SetActivity(m.GuildID, MusicPlaying) {
         currentActivity := voiceManager.GetCurrentActivity(m.GuildID)
-        var message string
+        message := "bot mkhdm mzika, tsna hta ysali"
         if currentActivity == TTSPlaying {
             message = "bot tydwi, tsna hta ysali"
-        } else {
-            message = "bot mkhdm mzika, tsna hta ysali"
         }
-        
+
         embed := &discordgo.MessageEmbed{
-            Title: "3a9o bika",
+            Title:       "3a9o bika",
             Description: message,
-            Color: 0xFF0000,
+            Color:       0xFF0000,
         }
         s.ChannelMessageSendEmbed(m.ChannelID, embed)
         return
@@ -407,20 +405,54 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
     player.mu.Lock()
     defer player.mu.Unlock()
 
-    song := Song{
-        URL:      url,
-        Title:    "YouTube Video",
-        Duration: "Unknown",
+    client := youtube.Client{}
+    video, err := client.GetVideo(url)
+    if err != nil {
+        voiceManager.ClearActivity(m.GuildID, MusicPlaying)
+        embed := &discordgo.MessageEmbed{
+            Title:       "Chi 7aja trat !!!",
+            Description: fmt.Sprintf("Error ma9drtch njib video: %v", err),
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageSendEmbed(m.ChannelID, embed)
+        return
     }
-    
+
+    // Find the first valid audio format
+    var format youtube.Format
+    for _, f := range video.Formats {
+        if f.AudioChannels > 0 {
+            format = f
+            break
+        }
+    }
+
+    if format == (youtube.Format{}) {
+        voiceManager.ClearActivity(m.GuildID, MusicPlaying)
+        embed := &discordgo.MessageEmbed{
+            Title:       "Chi 7aja trat !!!",
+            Description: "Ma9drtch nlga l format dyal audio",
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageSendEmbed(m.ChannelID, embed)
+        return
+    }
+
+    song := Song{
+        URL:      format.URL,
+        Title:    video.Title,
+        Duration: video.Duration.String(),
+    }
+
+    // Add song to the queue
     player.queue = append(player.queue, song)
-    
+
     embed := &discordgo.MessageEmbed{
-        Title: "Jdid fl Queue",
+        Title:       "Jdid fl Queue",
         Description: fmt.Sprintf("🎵 **%s**", song.Title),
-        Color: 0x00FF00,
+        Color:       0x00FF00,
         Footer: &discordgo.MessageEmbedFooter{
-            Text: "Added by " + m.Author.Username,
+            Text:    "Added by " + m.Author.Username,
             IconURL: m.Author.AvatarURL(""),
         },
     }
@@ -431,10 +463,9 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
     }
 }
 
-
 func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, player *MusicPlayer) {
     defer voiceManager.ClearActivity(guildID, MusicPlaying)
-    
+
     player.mu.Lock()
     if player.isPlaying {
         player.mu.Unlock()
@@ -468,31 +499,29 @@ func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, p
         if player.voiceConn == nil {
             vc, err := joinVoiceChannel(s, guildID, voiceChannelID)
             if err != nil {
+                fmt.Println("Error joining voice channel:", err)
                 continue
             }
             player.voiceConn = vc
         }
 
-        ffmpeg := exec.Command("ffmpeg", "-i", currentSong.URL,
-            "-f", "s16le",
-            "-ar", "48000",
-            "-ac", "2",
-            "-af", "volume=0.5",
-            "pipe:1")
-
+        ffmpeg := exec.Command("ffmpeg", "-i", currentSong.URL, "-f", "s16le", "-ar", "48000", "-ac", "2", "-af", "volume=0.5", "pipe:1")
         ffmpeg.Stderr = os.Stderr
         stdout, err := ffmpeg.StdoutPipe()
         if err != nil {
+            fmt.Println("Error creating FFMPEG stdout pipe:", err)
             continue
         }
 
         err = ffmpeg.Start()
         if err != nil {
+            fmt.Println("Error starting FFMPEG:", err)
             continue
         }
 
-        encoder, err := gopus.NewEncoder(frameRate, channels, gopus.Audio)
+        opusEncoder, err := opus.NewEncoder(48000, 2, opus.AppAudio)
         if err != nil {
+            fmt.Println("Error creating Opus encoder:", err)
             continue
         }
 
@@ -503,35 +532,36 @@ func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, p
         }
         s.ChannelMessageSendEmbed(voiceChannelID, embed)
 
-        buffer := make([]int16, frameSize*channels)
+        audioPCM := make([]int16, frameSize*channels)
         for {
-            err := binary.Read(stdout, binary.LittleEndian, &buffer)
-            if err == io.EOF || err == io.ErrUnexpectedEOF {
-                break
-            }
+            err := binary.Read(stdout, binary.LittleEndian, &audioPCM)
             if err != nil {
-                fmt.Println("Error reading from ffmpeg stdout:", err)
+                if err != io.EOF {
+                    fmt.Println("Error reading from FFMPEG stdout:", err)
+                }
                 break
             }
+			opusData := make([]byte, 960*2)
+			n, err := opusEncoder.Encode(audioPCM, opusData)
+			if err != nil {
+				fmt.Println("Error encoding Opus:", err)
+				continue
+			}
 
-            opus, err := encoder.Encode(buffer, frameSize, frameSize*2)
-            if err != nil {
-                fmt.Println("Error encoding to opus:", err)
-                break
-            }
-
-            select {
-            case player.voiceConn.OpusSend <- opus:
-            case <-player.stopChan:
-                ffmpeg.Process.Kill()
-                return
-            }
+			select {
+			case player.voiceConn.OpusSend <- opusData[:n]:
+			case <-player.stopChan:
+				ffmpeg.Process.Kill()
+				return
+			}
         }
-        
-        ffmpeg.Process.Kill()
+        ffmpeg.Wait()
         time.Sleep(200 * time.Millisecond)
     }
 }
+
+
+
 
 func handleSkip(s *discordgo.Session, m *discordgo.MessageCreate, player *MusicPlayer) {
 	player.mu.Lock()
