@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/google/generative-ai-go/genai"
 	"github.com/joho/godotenv"
@@ -31,6 +33,7 @@ const (
 	v          string        = "/ait-akinator"
 	valoPing   string        = "/dh valo-ping"
 	morphineCmd string 		 = "/dh lmorphine"
+	swlCmd     string        = "/dh swl"
 	RED        string        = "\033[31m"
 	YELLOW     string        = "\033[33m"
 	BLUE       string        = "\033[34m"
@@ -107,6 +110,22 @@ var (
 		{Name: "EU London", IP: "35.198.119.254", Location: "London, UK"},
 		{Name: "EU Stockholm", IP: "35.198.119.255", Location: "Stockholm, Sweden"},
 		{Name: "EU Warsaw", IP: "35.198.119.250", Location: "Warsaw, Poland"},
+	}
+	Response = []string{
+		"9witi 3liya  blas2ila",
+		"fhmtk wakha dwiti mn trmtk",
+		"miybi",
+		"kayna had lhdri" ,
+		"ah",
+		"la",
+		"owo",
+		"salam ,  3jbni so2al dyalk o jatni lfikra ntsa7bo",
+		"khoya sir gha t7wa ",
+		"dwiti bzf",
+		"mnkhdmch",
+		"gha ttbz m3a krk",
+		"oMMMMMMMar",
+		"NONAYMOROZA",
 	}
 )
 
@@ -300,6 +319,11 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
                     "• `/dh pwd` - Tchouf current path",
                 Inline: false,
             },
+			{
+				Name: "🎱 Magic 8-Ball",
+				Value: "• `/dh swl [question]` - swl lbot ijawbk ",
+				Inline: false,
+			},
         },
         Footer: &discordgo.MessageEmbedFooter{
             Text: "Written in Go  by  @aka_bousta",
@@ -307,6 +331,35 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
     }
     s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
+
+func handleMagic8Ball(s *discordgo.Session, m *discordgo.MessageCreate) {
+    question := strings.TrimPrefix(m.Content, swlCmd)
+    question = strings.TrimSpace(question)
+
+    if question == "" {
+        embed := &discordgo.MessageEmbed{
+            Title:       "Chi 7aja trat !!!",
+            Description: "Gha ttbz m3a krk , Khassek tktb chi so2al.",
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageSendEmbed(m.ChannelID, embed)
+        return
+    }
+
+    rand.Seed(time.Now().UnixNano())
+    response := Response[rand.Intn(len(Response))]
+    embed := &discordgo.MessageEmbed{
+        Title:       "🎱 " + question,
+        Description: "**" + response + "**",
+        Color:       0x9B59B6, 
+        Footer: &discordgo.MessageEmbedFooter{
+            Text:    "Asked by " + m.Author.Username,
+            IconURL: m.Author.AvatarURL(""),
+        },
+    }
+    s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
 
 func handlePing(s *discordgo.Session, m *discordgo.MessageCreate) {
     if !strings.HasPrefix(m.Content, valoPing) {
@@ -1189,6 +1242,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
         handlePing(s, m)
         return
     }
+	if strings.HasPrefix(m.Content, swlCmd) {
+		handleMagic8Ball(s, m)
+		return
+	}
 
 	args := strings.Split(m.Content, " ")
 	if args[0] == ai && len(args) > 1 {
