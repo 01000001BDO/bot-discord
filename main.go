@@ -23,7 +23,6 @@ import (
 	"github.com/kkdai/youtube/v2"
 	"google.golang.org/api/option"
 	"layeh.com/gopus"
-	"github.com/hraban/opus"
 )
 
 const (
@@ -257,6 +256,58 @@ func getOrCreatePlayer(guildID string) *MusicPlayer {
 	return player
 }
 
+func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
+    embed := &discordgo.MessageEmbed{
+        Title:       "🤖 Commands dyal L'bot",
+        Description: "List dyal Commands li kaynin fl bot:",
+        Color:       0x00FF00,
+        Fields: []*discordgo.MessageEmbedField{
+            {
+                Name: "🎵 Music Commands",
+                Value: "• `/dh play [url]` - play lchi track\n" +
+                    "• `/dh playlist [url]` - play  playlist (fiha mochkil lakan jhd n9adha ) \n" +
+                    "• `/dh skip` - Bach tskipi track\n" +
+                    "• `/dh stop` - Bach tw9f music\n" +
+                    "• `/dh queue` - Bach tchouf playlist",
+                Inline: false,
+            },
+            {
+                Name: "🎮 Game Commands",
+                Value: "• `/ait-akinator` -  ait Akinator \n" +
+                    "• `/ait-akinator (ah/la)` - Jawb 3la les questions",
+                Inline: false,
+            },
+            {
+                Name: "🎯 Valorant Command",
+                Value: "• `/dh valo-ping` - Tchouf ping dyal servers",
+                Inline: false,
+            },
+            {
+                Name: "🤖 AI Commands",
+                Value: "• `/ai [prompt]` - ask  Gemini",
+                Inline: false,
+            },
+            {
+                Name: "🗣️ Voice Commands",
+                Value: "• `/dh dwi [text]` - Bot ghayi9ra text li ktbti",
+                Inline: false,
+            },
+            {
+                Name: "⚙️ Utility Commands",
+                Value: "• `/dh clear [number]` - Msa7 messages\n" +
+                    "• `/dh latence` - Tchouf latency dyal bot\n" +
+                    "• `/dh ls` - Tchouf channels li kaynin\n" +
+                    "• `/dh pwd` - Tchouf current path",
+                Inline: false,
+            },
+        },
+        Footer: &discordgo.MessageEmbedFooter{
+            Text: "Written in Go  by  @aka_bousta",
+        },
+    }
+    s.ChannelMessageSendEmbed(m.ChannelID, embed)
+}
+
 func handlePing(s *discordgo.Session, m *discordgo.MessageCreate) {
     if !strings.HasPrefix(m.Content, valoPing) {
         return
@@ -372,25 +423,126 @@ func handleMusic(s *discordgo.Session, m *discordgo.MessageCreate, args []string
 			s.ChannelMessageSendEmbed(m.ChannelID, embed)
 			return
 		}
-		handlePlay(s, m, vs.ChannelID, args[2], player)
+		url := args[2]
+        if strings.Contains(url, "playlist?list=") {
+            handlePlaylist(s, m, vs.ChannelID, url, player)
+        } else {
+            handlePlay(s, m, vs.ChannelID, url, player)
+        }
 
-	case "skip":
-		handleSkip(s, m, player)
+    case "playlist":
+        if len(args) < 3 {
+            embed := &discordgo.MessageEmbed{
+                Title:       "Chi 7aja trat !!!",
+                Description: "Hbibi lien dyal playlist",
+                Color:       0xFF0000,
+            }
+            s.ChannelMessageSendEmbed(m.ChannelID, embed)
+            return
+        }
+        handlePlaylist(s, m, vs.ChannelID, args[2], player)
 
-	case "stop":
-		handleStop(s, m, player)
+    case "skip":
+        handleSkip(s, m, player)
 
-	case "queue":
-		handleQueue(s, m, player)
-	}
+    case "stop":
+        handleStop(s, m, player)
+
+    case "queue":
+        handleQueue(s, m, player)
+    }
+}
+
+// !TODO : mkhdamch had l9lawi : (khsni nfixi probeleme dyal link ) 
+func handlePlaylist(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID string, url string, player *MusicPlayer) {
+    if !voiceManager.SetActivity(m.GuildID, MusicPlaying) {
+        currentActivity := voiceManager.GetCurrentActivity(m.GuildID)
+        message := "Bot mkhdm mzika, tsna hta ysali"
+        if currentActivity == TTSPlaying {
+            message = "Bot tydwi, tsna hta ysali"
+        }
+        embed := &discordgo.MessageEmbed{
+            Title:       "3a9o bika",
+            Description: message,
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageSendEmbed(m.ChannelID, embed)
+        return
+    }
+    loadingEmbed := &discordgo.MessageEmbed{
+        Title:       "Loading Playlist 🎵",
+        Description: "Tsna chwiya, kanjib l playlist...",
+        Color:       0xFFFF00,
+    }
+    msg, err := s.ChannelMessageSendEmbed(m.ChannelID, loadingEmbed)
+    if err != nil {
+        fmt.Println("Error sending loading message:", err)
+        return
+    }
+    client := youtube.Client{}
+    playlist, err := client.GetPlaylist(url)
+    if err != nil {
+        voiceManager.ClearActivity(m.GuildID, MusicPlaying)
+        errorEmbed := &discordgo.MessageEmbed{
+            Title:       "Chi 7aja trat !!!",
+            Description: fmt.Sprintf("Error ma9drtch njib playlist: %v", err),
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageEditEmbed(m.ChannelID, msg.ID, errorEmbed)
+        return
+    }
+
+    player.mu.Lock()
+    defer player.mu.Unlock()
+    addedSongs := 0
+    for _, entry := range playlist.Videos {
+        video, err := client.GetVideo(fmt.Sprintf("https://www.youtube.com/watch?v=%s", entry.ID))
+        if err != nil {
+            continue
+        }
+        var format youtube.Format
+        for _, f := range video.Formats {
+            if f.AudioChannels > 0 {
+                format = f
+                break
+            }
+        }
+
+        if format == (youtube.Format{}) {
+            continue
+        }
+
+        song := Song{
+            URL:      format.URL,
+            Title:    video.Title,
+            Duration: video.Duration.String(),
+        }
+
+        player.queue = append(player.queue, song)
+        addedSongs++
+    }
+
+    resultEmbed := &discordgo.MessageEmbed{
+        Title:       "Playlist Added ✅",
+        Description: fmt.Sprintf("Zadt **%d** songs mn playlist\n**%s**", addedSongs, playlist.Title),
+        Color:       0x00FF00,
+        Footer: &discordgo.MessageEmbedFooter{
+            Text:    "Added by " + m.Author.Username,
+            IconURL: m.Author.AvatarURL(""),
+        },
+    }
+    s.ChannelMessageEditEmbed(m.ChannelID, msg.ID, resultEmbed)
+    if !player.isPlaying {
+        go startPlaying(s, m.GuildID, voiceChannelID, player)
+    }
 }
 
 func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID string, url string, player *MusicPlayer) {
     if !voiceManager.SetActivity(m.GuildID, MusicPlaying) {
         currentActivity := voiceManager.GetCurrentActivity(m.GuildID)
-        message := "bot mkhdm mzika, tsna hta ysali"
+        message := "Bot mkhdm mzika, tsna hta ysali"
         if currentActivity == TTSPlaying {
-            message = "bot tydwi, tsna hta ysali"
+            message = "Bot tydwi, tsna hta ysali"
         }
 
         embed := &discordgo.MessageEmbed{
@@ -418,7 +570,6 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
         return
     }
 
-    // Find the first valid audio format
     var format youtube.Format
     for _, f := range video.Formats {
         if f.AudioChannels > 0 {
@@ -427,28 +578,16 @@ func handlePlay(s *discordgo.Session, m *discordgo.MessageCreate, voiceChannelID
         }
     }
 
-    if format == (youtube.Format{}) {
-        voiceManager.ClearActivity(m.GuildID, MusicPlaying)
-        embed := &discordgo.MessageEmbed{
-            Title:       "Chi 7aja trat !!!",
-            Description: "Ma9drtch nlga l format dyal audio",
-            Color:       0xFF0000,
-        }
-        s.ChannelMessageSendEmbed(m.ChannelID, embed)
-        return
-    }
-
     song := Song{
         URL:      format.URL,
         Title:    video.Title,
         Duration: video.Duration.String(),
     }
 
-    // Add song to the queue
     player.queue = append(player.queue, song)
 
     embed := &discordgo.MessageEmbed{
-        Title:       "Jdid fl Queue",
+        Title:       "Tzadt fl Queue",
         Description: fmt.Sprintf("🎵 **%s**", song.Title),
         Color:       0x00FF00,
         Footer: &discordgo.MessageEmbedFooter{
@@ -482,12 +621,6 @@ func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, p
                 player.voiceConn.Disconnect()
                 player.voiceConn = nil
             }
-            embed := &discordgo.MessageEmbed{
-                Title:       "Queue Finished",
-                Description: "📭 Queue khawya, zid chi 7aja akhora",
-                Color:       0x00FF00,
-            }
-            s.ChannelMessageSendEmbed(voiceChannelID, embed)
             player.mu.Unlock()
             return
         }
@@ -505,23 +638,29 @@ func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, p
             player.voiceConn = vc
         }
 
-        ffmpeg := exec.Command("ffmpeg", "-i", currentSong.URL, "-f", "s16le", "-ar", "48000", "-ac", "2", "-af", "volume=0.5", "pipe:1")
-        ffmpeg.Stderr = os.Stderr
+        ffmpeg := exec.Command("ffmpeg", "-i", currentSong.URL, 
+            "-f", "s16le", 
+            "-ar", "48000", 
+            "-ac", "2",
+            "-af", "volume=0.5",
+            "pipe:1")
+            
+        ffmpeg.Stderr = nil
         stdout, err := ffmpeg.StdoutPipe()
         if err != nil {
-            fmt.Println("Error creating FFMPEG stdout pipe:", err)
+            fmt.Println("Error creating stdout pipe:", err)
             continue
         }
 
         err = ffmpeg.Start()
         if err != nil {
-            fmt.Println("Error starting FFMPEG:", err)
+            fmt.Println("Error starting ffmpeg:", err)
             continue
         }
 
-        opusEncoder, err := opus.NewEncoder(48000, 2, opus.AppAudio)
+        encoder, err := gopus.NewEncoder(frameRate, channels, gopus.Audio)
         if err != nil {
-            fmt.Println("Error creating Opus encoder:", err)
+            fmt.Println("Error creating opus encoder:", err)
             continue
         }
 
@@ -531,103 +670,109 @@ func startPlaying(s *discordgo.Session, guildID string, voiceChannelID string, p
             Color:       0x00FF00,
         }
         s.ChannelMessageSendEmbed(voiceChannelID, embed)
-
         audioPCM := make([]int16, frameSize*channels)
         for {
             err := binary.Read(stdout, binary.LittleEndian, &audioPCM)
             if err != nil {
                 if err != io.EOF {
-                    fmt.Println("Error reading from FFMPEG stdout:", err)
+                    fmt.Println("Error reading from ffmpeg stdout:", err)
                 }
                 break
             }
-			opusData := make([]byte, 960*2)
-			n, err := opusEncoder.Encode(audioPCM, opusData)
+
+			opusData, err := encoder.Encode(audioPCM, frameSize, frameSize*2)
 			if err != nil {
-				fmt.Println("Error encoding Opus:", err)
+				fmt.Println("Error encoding to opus:", err)
 				continue
 			}
-
+			
 			select {
-			case player.voiceConn.OpusSend <- opusData[:n]:
-			case <-player.stopChan:
-				ffmpeg.Process.Kill()
-				return
-			}
+			case player.voiceConn.OpusSend <- opusData:
+            case <-player.stopChan:
+                ffmpeg.Process.Kill()
+                return
+            }
         }
+
         ffmpeg.Wait()
         time.Sleep(200 * time.Millisecond)
     }
 }
 
 
-
-
 func handleSkip(s *discordgo.Session, m *discordgo.MessageCreate, player *MusicPlayer) {
-	player.mu.Lock()
-	defer player.mu.Unlock()
+    player.mu.Lock()
+    if len(player.queue) == 0 && !player.isPlaying {
+        embed := &discordgo.MessageEmbed{
+            Title:       "Chi 7aja trat !!!",
+            Description: "Queue khawya akhoya",
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageSendEmbed(m.ChannelID, embed)
+        player.mu.Unlock()
+        return
+    }
+    if player.isPlaying {
+        close(player.stopChan)
+        player.stopChan = make(chan bool)
+        player.isPlaying = false
+    }
 
-	if len(player.queue) == 0 && !player.isPlaying {
-		embed := &discordgo.MessageEmbed{
-			Title:       "Chi 7aja trat !!!",
-			Description: "Queue khawya akhoya",
-			Color:       0xFF0000,
-		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
-		return
-	}
-
-	close(player.stopChan)
-	player.stopChan = make(chan bool)
-
-	embed := &discordgo.MessageEmbed{
-		Title:       "Skip ✅",
-		Description: "⏭️ tskipat a hbibi ",
-		Color:       0x00FF00,
-		Footer: &discordgo.MessageEmbedFooter{
-			Text:    "Skipped by " + m.Author.Username,
-			IconURL: m.Author.AvatarURL(""),
-		},
-	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    embed := &discordgo.MessageEmbed{
+        Title:       "Skip ✅",
+        Description: "⏭️ tskipat a hbibi",
+        Color:       0x00FF00,
+        Footer: &discordgo.MessageEmbedFooter{
+            Text:    "Skipped by " + m.Author.Username,
+            IconURL: m.Author.AvatarURL(""),
+        },
+    }
+    s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    if len(player.queue) > 0 && !player.isPlaying {
+        vs, err := findUserVoiceState(s, m.GuildID, m.Author.ID)
+        if err == nil {
+            go startPlaying(s, m.GuildID, vs.ChannelID, player)
+        }
+    }
+    player.mu.Unlock()
 }
 
 func handleQueue(s *discordgo.Session, m *discordgo.MessageCreate, player *MusicPlayer) {
-	player.mu.Lock()
-	defer player.mu.Unlock()
+    player.mu.Lock()
+    defer player.mu.Unlock()
 
-	if len(player.queue) == 0 {
-		embed := &discordgo.MessageEmbed{
-			Title:       "Queue",
-			Description: "📭 Queue khawi azb",
-			Color:       0xFF0000,
-		}
-		s.ChannelMessageSendEmbed(m.ChannelID, embed)
-		return
-	}
+    if len(player.queue) == 0 {
+        embed := &discordgo.MessageEmbed{
+            Title:       "Queue",
+            Description: "📭 Queue khawi azb",
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageSendEmbed(m.ChannelID, embed)
+        return
+    }
 
-	var queueMsg strings.Builder
-	for i, song := range player.queue {
-		queueMsg.WriteString(fmt.Sprintf("%d. 🎵 **%s**\n⏱️ Duration: %s\n\n", i+1, song.Title, song.Duration))
-	}
+    var queueMsg strings.Builder
+    for i, song := range player.queue {
+        queueMsg.WriteString(fmt.Sprintf("%d. 🎵 **%s**\n⏱️ Duration: %s\n\n", i+1, song.Title, song.Duration))
+    }
 
-	embed := &discordgo.MessageEmbed{
-		Title:       "Queue ✅",
-		Description: queueMsg.String(),
-		Color:       0x00FF00,
-		Fields: []*discordgo.MessageEmbedField{
-			{
-				Name:   "Total Songs",
-				Value:  fmt.Sprintf("%d", len(player.queue)),
-				Inline: true,
-			},
-		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text:    "Requested by " + m.Author.Username,
-			IconURL: m.Author.AvatarURL(""),
-		},
-	}
-	s.ChannelMessageSendEmbed(m.ChannelID, embed)
+    embed := &discordgo.MessageEmbed{
+        Title:       "Queue ✅",
+        Description: queueMsg.String(),
+        Color:       0x00FF00,
+        Fields: []*discordgo.MessageEmbedField{
+            {
+                Name:   "Total Songs",
+                Value:  fmt.Sprintf("%d", len(player.queue)),
+                Inline: true,
+            },
+        },
+        Footer: &discordgo.MessageEmbedFooter{
+            Text:    "Requested by " + m.Author.Username,
+            IconURL: m.Author.AvatarURL(""),
+        },
+    }
+    s.ChannelMessageSendEmbed(m.ChannelID, embed)
 }
 
 func handleStop(s *discordgo.Session, m *discordgo.MessageCreate, player *MusicPlayer) {
@@ -646,11 +791,11 @@ func handleStop(s *discordgo.Session, m *discordgo.MessageCreate, player *MusicP
     voiceManager.ClearActivity(m.GuildID, MusicPlaying)
 
     embed := &discordgo.MessageEmbed{
-        Title: "Stop ✅",
+        Title:       "Stop ✅",
         Description: "⏹️ tfi lbolice jwan jay hh",
-        Color: 0x00FF00,
+        Color:       0x00FF00,
         Footer: &discordgo.MessageEmbedFooter{
-            Text: "Stopped by " + m.Author.Username,
+            Text:    "Stopped by " + m.Author.Username,
             IconURL: m.Author.AvatarURL(""),
         },
     }
@@ -1189,6 +1334,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		if args[1] == "clear" {
 			handleClearChat(s, m, args)
+			return
+		}
+		if args[1] == "help" {
+			handleHelp(s, m)
 			return
 		}
 	}
