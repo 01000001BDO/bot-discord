@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -34,6 +37,7 @@ const (
 	valoPing   string        = "/dh valo-ping"
 	morphineCmd string 		 = "/dh lmorphine"
 	swlCmd     string        = "/dh swl"
+	nmapCmd    string        = "/dh scan "
 	RED        string        = "\033[31m"
 	YELLOW     string        = "\033[33m"
 	BLUE       string        = "\033[34m"
@@ -168,6 +172,39 @@ type ValorantServer struct {
 }
 
 
+type ScanResult struct {
+    URL           string
+    IP            []string
+    Hostname      string
+    Technologies  []string
+    Headers       map[string]string
+    TLSInfo       *tls.ConnectionState
+    OpenPorts     []int
+    DNS           DNSInfo
+    WebTech       WebTechnologies
+}
+
+type DNSInfo struct {
+    MXRecords     []string
+    TXTRecords    []string
+    NSRecords     []string
+    CNAMERecords  []string
+}
+
+type WebTechnologies struct {
+    Frameworks    []string
+    Libraries     []string
+    BuildTools    []string
+    UILibraries   []string
+    Analytics     []string
+    Deployment    []string
+}
+
+type SecurityScanner struct {
+    client        *http.Client
+    mutex         sync.Mutex
+    techPatterns  map[string]map[string][]string
+}
 
 
 func logMsg(lvl, m string) {
@@ -257,6 +294,7 @@ func saveToJson() {
 	}
 }
 
+
 func joinVoiceChannel(s *discordgo.Session, guildID, channelID string) (*discordgo.VoiceConnection, error) {
 	return s.ChannelVoiceJoin(guildID, channelID, false, true)
 }
@@ -273,6 +311,20 @@ func getOrCreatePlayer(guildID string) *MusicPlayer {
 	}
 	players[guildID] = player
 	return player
+}
+
+func NewSecurityScanner() *SecurityScanner {
+    return &SecurityScanner{
+        client: &http.Client{
+            Timeout: 15 * time.Second,
+            Transport: &http.Transport{
+                TLSClientConfig: &tls.Config{
+                    InsecureSkipVerify: true, 
+                },
+            },
+        },
+        techPatterns: initTechPatterns(),
+    }
 }
 
 func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -297,10 +349,11 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
                 Inline: false,
             },
             {
-                Name: "🎯 Valorant Command",
-                Value: "• `/dh valo-ping` - Tchouf ping dyal servers",
-                Inline: false,
-            },
+				Name: "🎯 Valorant Command",
+				Value: "• `/dh valo-ping` - Tchouf ping dyal servers\n" +
+					   "• `/dh valo-ping [ip]` - Tchouf ping dyal IP dyalk ",
+				Inline: false,
+			},
             {
                 Name: "🤖 AI Commands",
                 Value: "• `/ai [prompt]` - ask  Gemini",
@@ -322,6 +375,13 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
 			{
 				Name: "🎱 Magic 8-Ball",
 				Value: "• `/dh swl [question]` - swl lbot ijawbk ",
+				Inline: false,
+			},
+			{
+				Name: "🔍 Security Scanner",
+				Value: "• `/dh scan [url]` - Scan website (gathering information public : IP/Tech/ports ..)\n" +
+					"• Example: `/dh scan diamondhands.com`\n" +
+					"**NOTE:** Matkhdmch l scan 3la sites li machi dyalk.",
 				Inline: false,
 			},
         },
@@ -362,9 +422,13 @@ func handleMagic8Ball(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 
 func handlePing(s *discordgo.Session, m *discordgo.MessageCreate) {
+    args := strings.Split(m.Content, " ")
+    isCustomIP := len(args) > 2 && args[2] != ""
+    
     if !strings.HasPrefix(m.Content, valoPing) {
         return
     }
+
     embed := &discordgo.MessageEmbed{
         Title:       "🔍 Omoro ta7dot ",
         Description: "tsna wa7d chwiya , l omor ta7dot",
@@ -382,9 +446,9 @@ func handlePing(s *discordgo.Session, m *discordgo.MessageCreate) {
         Ping     float64 `json:"ping"`
     }
     var results []PingResult
-
-    for _, server := range valorantServers {
-        cmd := exec.Command("ping", "-c", "3", server.IP)
+    if isCustomIP {
+        customIP := args[2]
+        cmd := exec.Command("ping", "-c", "3", customIP)
         output, err := cmd.CombinedOutput()
         var pingTime float64
         if err != nil {
@@ -410,27 +474,66 @@ func handlePing(s *discordgo.Session, m *discordgo.MessageCreate) {
                 }
             }
         }
-
+        
         results = append(results, PingResult{
-            Name:     server.Name,
-            Location: server.Location,
+            Name:     "Custom IP",
+            Location: "User Specified",
             Ping:     math.Round(pingTime*100) / 100,
         })
+    } else {
+        for _, server := range valorantServers {
+            cmd := exec.Command("ping", "-c", "3", server.IP)
+            output, err := cmd.CombinedOutput()
+            var pingTime float64
+            if err != nil {
+                pingTime = 999
+            } else {
+                outputStr := string(output)
+                re := regexp.MustCompile(`time=(\d+\.?\d*)`)
+                matches := re.FindAllStringSubmatch(outputStr, -1)
+                
+                if len(matches) > 0 {
+                    var total float64
+                    count := 0
+                    for _, match := range matches {
+                        if len(match) > 1 {
+                            if val, err := strconv.ParseFloat(match[1], 64); err == nil {
+                                total += val
+                                count++
+                            }
+                        }
+                    }
+                    if count > 0 {
+                        pingTime = total / float64(count)
+                    }
+                }
+            }
+
+            results = append(results, PingResult{
+                Name:     server.Name,
+                Location: server.Location,
+                Ping:     math.Round(pingTime*100) / 100,
+            })
+        }
+    }
+    title := "🌐 Valorant EU Server Pings"
+    if isCustomIP {
+        title = "🌐 Custom IP Ping Results"
     }
 
     embed = &discordgo.MessageEmbed{
-        Title:       "🌐 Valorant EU Server Pings",
+        Title:       title,
         Description: "Lpingat lmla7:",
         Color:       0x00FF00,
         Fields:      make([]*discordgo.MessageEmbedField, 0),
     }
 
     for _, result := range results {
-        pingStatus := "🟢" 
+        pingStatus := "🟢"
         if result.Ping > 100 {
-            pingStatus = "🔴" 
+            pingStatus = "🔴"
         } else if result.Ping > 50 {
-            pingStatus = "🟡" 
+            pingStatus = "🟡"
         }
 
         embed.Fields = append(embed.Fields, &discordgo.MessageEmbedField{
@@ -439,10 +542,361 @@ func handlePing(s *discordgo.Session, m *discordgo.MessageCreate) {
             Inline: true,
         })
     }
+
     _, err = s.ChannelMessageEditEmbed(m.ChannelID, msg.ID, embed)
     if err != nil {
         logMsg("ERROR", fmt.Sprintf("Error updating ping message: %v", err))
     }
+}
+
+
+func initTechPatterns() map[string]map[string][]string {
+    return map[string]map[string][]string{
+        "Frameworks": {
+            "Next.js": {
+                `"__NEXT_DATA__"`,
+                `/_next/static`,
+                `next/dist/pages/_app`,
+            },
+            "React": {
+                `react.development.js`,
+                `react.production.min.js`,
+                `__REACT_DEVTOOLS_GLOBAL_HOOK__`,
+            },
+            "Vue.js": {
+                `vue.js`,
+                `vue.min.js`,
+                `__vue__`,
+            },
+            "Angular": {
+                `ng-version`,
+                `angular.js`,
+                `angular.min.js`,
+            },
+        },
+        "BuildTools": {
+            "Webpack": {
+                `webpackJsonp`,
+                `__webpack_require__`,
+            },
+            "Vite": {
+                `@vite/client`,
+                `vite/dist`,
+            },
+            "Parcel": {
+                `parcelRequire`,
+            },
+        },
+        "UILibraries": {
+            "Tailwind CSS": {
+                `tailwind`,
+                `tw-`,
+            },
+            "Material-UI": {
+                `MuiButton`,
+                `MuiTypography`,
+            },
+            "Bootstrap": {
+                `bootstrap.min.css`,
+                `bootstrap.bundle.js`,
+            },
+        },
+        "Analytics": {
+            "Google Analytics": {
+                `google-analytics.com`,
+                `gtag`,
+                `ga.js`,
+            },
+            "Plausible": {
+                `plausible.io`,
+            },
+        },
+		"CloudServices": {
+			"Vercel": {
+				`vercel.app`,
+				`vercel-analytics`,
+				`vercel.com`,
+			},
+			"Netlify": {
+				`netlify.app`,
+				`netlify.com`,
+				`netlify-headers`,
+			},
+			"Cloudflare": {
+				`cloudflare`,
+				`__cf_bm`,
+				`cf-ray`,
+			},
+			"AWS": {
+				`amazonaws.com`,
+				`aws-amplify`,
+				`x-amz-`,
+			},
+			"GitHub Pages": {
+				`github.io`,
+				`githubusercontent`,
+			},
+			"Firebase": {
+				`firebaseapp.com`,
+				`firebase-hosting`,
+			},
+		},
+    }
+}
+
+func (s *SecurityScanner) ScanTarget(target string) (*ScanResult, error) {
+    if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+        target = "https://" + target
+    }
+
+    result := &ScanResult{
+        URL:     target,
+        Headers: make(map[string]string),
+        WebTech: WebTechnologies{},
+    }
+
+    host := strings.TrimPrefix(strings.TrimPrefix(target, "https://"), "http://")
+    host = strings.Split(host, "/")[0]
+    ips, err := net.LookupIP(host)
+    if err == nil {
+        for _, ip := range ips {
+            result.IP = append(result.IP, ip.String())
+        }
+    }
+    if len(result.IP) > 0 {
+        hostnames, err := net.LookupAddr(result.IP[0])
+        if err == nil && len(hostnames) > 0 {
+            result.Hostname = hostnames[0]
+        }
+    }
+    result.DNS = s.getDNSInfo(host)
+    if len(result.IP) > 0 {
+        result.OpenPorts = s.scanPorts(result.IP[0])
+    }
+    req, err := http.NewRequest("GET", target, nil)
+    if err != nil {
+        return nil, fmt.Errorf("error creating request: %v", err)
+    }
+
+    req.Header.Set("User-Agent", "SecurityScanner/1.0")
+    resp, err := s.client.Do(req)
+    if err != nil {
+        return nil, fmt.Errorf("error making request: %v", err)
+    }
+    defer resp.Body.Close()
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return nil, fmt.Errorf("error reading body: %v", err)
+    }
+    for name, values := range resp.Header {
+        result.Headers[name] = strings.Join(values, ", ")
+    }
+    result.Technologies = s.detectTechnologies(resp.Header, body)
+	cloudServices := s.detectCloudServices(target, resp.Header)
+	result.Technologies = append(result.Technologies, cloudServices...)
+    if resp.TLS != nil {
+        result.TLSInfo = resp.TLS
+    }
+
+    return result, nil
+}
+
+
+func (s *SecurityScanner) detectTechnologies(headers http.Header, body []byte) []string {
+    var technologies []string
+    bodyStr := string(body)
+    if server := headers.Get("Server"); server != "" {
+        technologies = append(technologies, "Server: "+server)
+    }
+    if powered := headers.Get("X-Powered-By"); powered != "" {
+        technologies = append(technologies, "Powered By: "+powered)
+    }
+    for category, techs := range s.techPatterns {
+        for techName, patterns := range techs {
+            for _, pattern := range patterns {
+                if strings.Contains(bodyStr, pattern) {
+                    technologies = append(technologies, fmt.Sprintf("%s: %s", category, techName))
+                    break
+                }
+            }
+        }
+    }
+    scriptRegex := regexp.MustCompile(`<script[^>]*src=['"](.*?)['"][^>]*>`)
+    scripts := scriptRegex.FindAllStringSubmatch(bodyStr, -1)
+    for _, script := range scripts {
+        if len(script) > 1 {
+            technologies = append(technologies, "Script: "+script[1])
+        }
+    }
+
+    return unique(technologies)
+}
+
+func (s *SecurityScanner) detectCloudServices(url string, headers http.Header) []string {
+    var services []string
+    for cloudName, patterns := range s.techPatterns["CloudServices"] {
+        for _, pattern := range patterns {
+            if strings.Contains(url, pattern) {
+                services = append(services, fmt.Sprintf("Cloud Platform: %s", cloudName))
+                break
+            }
+        }
+    }
+    cloudHeaders := map[string]string{
+        "x-vercel-id":        "Vercel",
+        "x-netlify":          "Netlify",
+        "cf-ray":             "Cloudflare",
+        "x-github-request":   "GitHub Pages",
+        "x-firebase-hosting": "Firebase",
+    }
+
+    for header, platform := range cloudHeaders {
+        if value := headers.Get(header); value != "" {
+            services = append(services, "Cloud Platform: "+platform)
+        }
+    }
+    return unique(services)
+}
+
+func (s *SecurityScanner) scanPorts(ip string) []int {
+    commonPorts := []int{80, 443, 8080, 8443, 3000, 4000, 5000}
+    var openPorts []int
+    var wg sync.WaitGroup
+    var mutex sync.Mutex
+
+    for _, port := range commonPorts {
+        wg.Add(1)
+        go func(p int) {
+            defer wg.Done()
+            address := fmt.Sprintf("%s:%d", ip, p)
+            conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+            if err == nil {
+                mutex.Lock()
+                openPorts = append(openPorts, p)
+                mutex.Unlock()
+                conn.Close()
+            }
+        }(port)
+    }
+    wg.Wait()
+    return openPorts
+}
+
+func (s *SecurityScanner) getDNSInfo(domain string) DNSInfo {
+    var info DNSInfo
+
+    if mxRecords, err := net.LookupMX(domain); err == nil {
+        for _, mx := range mxRecords {
+            info.MXRecords = append(info.MXRecords, mx.Host)
+        }
+    }
+
+    if txtRecords, err := net.LookupTXT(domain); err == nil {
+        info.TXTRecords = txtRecords
+    }
+
+    if nsRecords, err := net.LookupNS(domain); err == nil {
+        for _, ns := range nsRecords {
+            info.NSRecords = append(info.NSRecords, ns.Host)
+        }
+    }
+
+    if cname, err := net.LookupCNAME(domain); err == nil {
+        info.CNAMERecords = append(info.CNAMERecords, cname)
+    }
+
+    return info
+}
+
+func unique(slice []string) []string {
+    keys := make(map[string]bool)
+    var list []string
+    for _, entry := range slice {
+        if _, value := keys[entry]; !value {
+            keys[entry] = true
+            list = append(list, entry)
+        }
+    }
+    return list
+}
+func handleEnhancedScan(s *discordgo.Session, m *discordgo.MessageCreate, target string) {
+    scanner := NewSecurityScanner()
+    
+    embed := &discordgo.MessageEmbed{
+        Title:       "🔍 Scanning Target",
+        Description: fmt.Sprintf("Scanning %s for detailed information...", target),
+        Color:       0xFFFF00,
+    }
+    msg, _ := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+
+    result, err := scanner.ScanTarget(target)
+    if err != nil {
+        errorEmbed := &discordgo.MessageEmbed{
+            Title:       "❌ Scan Faila ahbibi hh (skill issue ola probleme flink )",
+            Description: fmt.Sprintf("Error scanning target: %v", err),
+            Color:       0xFF0000,
+        }
+        s.ChannelMessageEditEmbed(m.ChannelID, msg.ID, errorEmbed)
+        return
+    }
+
+    var description strings.Builder
+    description.WriteString("**🌐 Network Information**\n")
+    if len(result.IP) > 0 {
+        description.WriteString(fmt.Sprintf("• IP Addresses: %s\n", strings.Join(result.IP, ", ")))
+    }
+    if result.Hostname != "" {
+        description.WriteString(fmt.Sprintf("• Hostname: %s\n", result.Hostname))
+    }
+    if len(result.OpenPorts) > 0 {
+        description.WriteString("\n**🔌 Open Ports**\n")
+        for _, port := range result.OpenPorts {
+            description.WriteString(fmt.Sprintf("• %d\n", port))
+        }
+    }
+    if len(result.Technologies) > 0 {
+        description.WriteString("\n**💻 Technologies Detected**\n")
+        for _, tech := range result.Technologies {
+            description.WriteString(fmt.Sprintf("• %s\n", tech))
+        }
+    }
+    if len(result.DNS.MXRecords) > 0 || len(result.DNS.NSRecords) > 0 {
+        description.WriteString("\n**📡 DNS Information**\n")
+        if len(result.DNS.MXRecords) > 0 {
+            description.WriteString(fmt.Sprintf("• MX Records: %s\n", strings.Join(result.DNS.MXRecords, ", ")))
+        }
+        if len(result.DNS.NSRecords) > 0 {
+            description.WriteString(fmt.Sprintf("• NS Records: %s\n", strings.Join(result.DNS.NSRecords, ", ")))
+        }
+    }
+    if result.TLSInfo != nil {
+        description.WriteString("\n**🔒 SSL/TLS Information**\n")
+        description.WriteString(fmt.Sprintf("• Version: %s\n", getTLSVersion(result.TLSInfo.Version)))
+        description.WriteString(fmt.Sprintf("• Cipher Suite: %v\n", result.TLSInfo.CipherSuite))
+    }
+
+    resultEmbed := &discordgo.MessageEmbed{
+        Title:       "🎯 Scan Results , 3ich ahbibi",
+        Description: description.String(),
+        Color:       0x00FF00,
+        Footer: &discordgo.MessageEmbedFooter{
+            Text: "Mtn7mlch lms2oliya dyal scan  , une fois drti scan all informations are gone  ",
+        },
+    }
+    s.ChannelMessageEditEmbed(m.ChannelID, msg.ID, resultEmbed)
+}
+
+func getTLSVersion(version uint16) string {
+    versions := map[uint16]string{
+        tls.VersionTLS10: "TLS 1.0",
+        tls.VersionTLS11: "TLS 1.1",
+        tls.VersionTLS12: "TLS 1.2",
+        tls.VersionTLS13: "TLS 1.3",
+    }
+    if v, ok := versions[version]; ok {
+        return v
+    }
+    return "Unknown"
 }
 
 
@@ -1244,6 +1698,21 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
     }
 	if strings.HasPrefix(m.Content, swlCmd) {
 		handleMagic8Ball(s, m)
+		return
+	}
+
+	if strings.HasPrefix(m.Content, nmapCmd) {
+		args := strings.Split(m.Content, " ")
+		if len(args) < 3 {
+			embed := &discordgo.MessageEmbed{
+				Title:       "Error",
+				Description: "Please provide a website to scan. Usage: `/dh scan example.com`",
+				Color:       0xFF0000,
+			}
+			s.ChannelMessageSendEmbed(m.ChannelID, embed)
+			return
+		}
+		handleEnhancedScan(s, m, args[2])
 		return
 	}
 
