@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,6 +49,9 @@ const (
 	NoActivity VoiceActivity = iota
 	MusicPlaying
 	TTSPlaying
+    g1 = "👊"
+    g2 = "✌️"
+    g3 = "✋"
 )
 var (
 	firstTime = make(map[string]bool)
@@ -131,6 +135,8 @@ var (
 		"oMMMMMMMar",
 		"NONAYMOROZA",
 	}
+    playerScores = make(map[string]*PlayerScore) 
+    scoresFile = "game_scores.json"
 )
 
 type VoiceActivity int
@@ -206,6 +212,14 @@ type SecurityScanner struct {
     techPatterns  map[string]map[string][]string
 }
 
+type PlayerScore struct {
+    UserID    string `json:"user_id"`
+    Username  string `json:"username"`
+    Wins      int    `json:"wins"`
+    Losses    int    `json:"losses"`
+    Draws     int    `json:"draws"`
+    LastPlayed time.Time `json:"last_played"`
+}
 
 func logMsg(lvl, m string) {
 	t := time.Now()
@@ -293,7 +307,26 @@ func saveToJson() {
 		return
 	}
 }
+func loadScores() error {
+    data, err := os.ReadFile(scoresFile)
+    if err != nil {
+        if os.IsNotExist(err) {
+            return nil 
+        }
+        return err
+    }
 
+    return json.Unmarshal(data, &playerScores)
+}
+
+func saveScores() error {
+    data, err := json.MarshalIndent(playerScores, "", "    ")
+    if err != nil {
+        return err
+    }
+
+    return os.WriteFile(scoresFile, data, 0644)
+}
 
 func joinVoiceChannel(s *discordgo.Session, guildID, channelID string) (*discordgo.VoiceConnection, error) {
 	return s.ChannelVoiceJoin(guildID, channelID, false, true)
@@ -345,7 +378,14 @@ func handleHelp(s *discordgo.Session, m *discordgo.MessageCreate) {
             {
                 Name: "🎮 Game Commands",
                 Value: "• `/ait-akinator` -  ait Akinator \n" +
-                    "• `/ait-akinator (ah/la)` - Jawb 3la les questions",
+                    "• `/ait-akinator (ah/la)` - Jawb 3la les questions\n" +
+                    "• `/dh game` - L3b 7ajara wara9 mi9ass m3a lbot\n" +
+                    "   - 👊 = 7ajara\n" +
+                    "  - ✌️ = wra9a\n" +
+                    "  - ✋ = m9ass\n" +
+                    "  - 🔄 = rematch\n" +
+                    "  - ❌ = exit game\n" +
+                    "  - 📊 = leaderboard",
                 Inline: false,
             },
             {
@@ -899,6 +939,207 @@ func getTLSVersion(version uint16) string {
     return "Unknown"
 }
 
+func handleGameReaction(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
+    if r.UserID == s.State.User.ID {
+        return
+    }
+    if _, exists := playerScores[r.UserID]; !exists {
+        user, _ := s.User(r.UserID)
+        username := "Unknown"
+        if user != nil {
+            username = user.Username
+        }
+        playerScores[r.UserID] = &PlayerScore{
+            UserID: r.UserID,
+            Username: username,
+            Wins: 0,
+            Losses: 0,
+            Draws: 0,
+        }
+    }
+    playerScore := playerScores[r.UserID]
+    if r.Emoji.Name == "📊" {
+        showLeaderboard(s, r.ChannelID)
+        return
+    }
+    if r.Emoji.Name == "🔄" {
+        embed := &discordgo.MessageEmbed{
+            Title: "🎮 7jar Wra9 M9ass",
+            Description: "Mchina laysm7 lina?\n\n" +
+                "👊 = 7ajara\n" +
+                "✌️ = wra9a\n" +
+                "✋ = m9ass\n\n" +
+                "Click 3la emoji bach tl3b!\n\n" +
+                "🔄 = rematch\n" +
+                "❌ = exit game\n" +
+                "📊 = leaderboard",
+            Color: 0x00FF00,
+        }
+       
+        newMsg, _ := s.ChannelMessageSendEmbed(r.ChannelID, embed)
+        s.MessageReactionAdd(newMsg.ChannelID, newMsg.ID, "👊")
+        s.MessageReactionAdd(newMsg.ChannelID, newMsg.ID, "✌️")
+        s.MessageReactionAdd(newMsg.ChannelID, newMsg.ID, "✋")
+        s.MessageReactionAdd(newMsg.ChannelID, newMsg.ID, "🔄")
+        s.MessageReactionAdd(newMsg.ChannelID, newMsg.ID, "❌")
+        s.MessageReactionAdd(newMsg.ChannelID, newMsg.ID, "📊")
+        return
+    } else if r.Emoji.Name == "❌" {
+        showPlayerScore(s, r.ChannelID, r.UserID)
+        s.ChannelMessageSendEmbed(r.ChannelID, &discordgo.MessageEmbed{
+            Title: "👋 yawdi yawdi z3ma rijal",
+            Description: "lay9tlna m3a rjal",
+            Color: 0xFF0000,
+        })
+        return
+    }
+
+    choices := map[string]string{
+        "👊": "7ajara",
+        "✌️": "wra9",
+        "✋": "m9ass",
+    }
+ 
+    if _, isGameMove := choices[r.Emoji.Name]; !isGameMove {
+        return
+    }
+ 
+    botEmojis := []string{"👊", "✌️", "✋"}
+    botChoice := botEmojis[rand.Intn(len(botEmojis))]
+    userChoice := r.Emoji.Name
+   
+    var result string
+    var color int
+    if userChoice == botChoice {
+        result = "wa 3rgan 😐"
+        color = 0xFFFF00
+        playerScore.Draws++
+    } else if (userChoice == "👊" && botChoice == "✌️") ||
+        (userChoice == "✌️" && botChoice == "✋") ||
+        (userChoice == "✋" && botChoice == "👊") {
+        result = "9lawi 3La ji3an , atzid ola atghryha b7al l9hyba hh?"
+        color = 0x00FF00
+        playerScore.Wins++
+    } else {
+        result = "olyaaaa idk fzeb rb7t, li drbna 9a3o myhmnach sda3o"
+        color = 0xFF0000
+        playerScore.Losses++
+    }
+    playerScore.LastPlayed = time.Now()
+    if err := saveScores(); err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error saving scores: %v", err))
+    }
+ 
+    embed := &discordgo.MessageEmbed{
+        Title: "🎮 Score finale",
+        Fields: []*discordgo.MessageEmbedField{
+            {
+                Name: "Nta:",
+                Value: choices[userChoice],
+                Inline: true,
+            },
+            {
+                Name: "Ana:",
+                Value: choices[botChoice],
+                Inline: true,
+            },
+            {
+                Name: "Score dyalk:",
+                Value: fmt.Sprintf("Rbe7ti: %d\nKhserti: %d\nT3adol: %d\nWin Rate: %.1f%%",
+                    playerScore.Wins, playerScore.Losses, playerScore.Draws,
+                    calculateWinRate(playerScore)),
+                Inline: false,
+            },
+        },
+        Description: result + "\n\n🔄 = rematch\n❌ = exit game\n📊 = leaderboard",
+        Color: color,
+        Footer: &discordgo.MessageEmbedFooter{
+            Text: "Zayd ola nayd",
+        },
+    } 
+    resultMsg, _ := s.ChannelMessageSendEmbed(r.ChannelID, embed)
+    s.MessageReactionAdd(resultMsg.ChannelID, resultMsg.ID, "🔄")
+    s.MessageReactionAdd(resultMsg.ChannelID, resultMsg.ID, "❌")
+    s.MessageReactionAdd(resultMsg.ChannelID, resultMsg.ID, "📊")
+}
+
+ func showPlayerScore(s *discordgo.Session, channelID string, userID string) {
+    if score, exists := playerScores[userID]; exists {
+        user, _ := s.User(userID)
+        username := "Unknown"
+        if user != nil {
+            username = user.Username
+        }
+        embed := &discordgo.MessageEmbed{
+            Title: "📊 Score dyal " + username,
+            Description: fmt.Sprintf(
+                "**Rbe7ti:** %d\n**Khserti:** %d\n**T3adol:** %d\n**Win Rate:** %.1f%%",
+                score.Wins, score.Losses, score.Draws,
+                calculateWinRate(score),
+            ),
+            Color: 0x00FF00,
+        }
+        s.ChannelMessageSendEmbed(channelID, embed)
+    }
+}
+func calculateWinRate(score *PlayerScore) float64 {
+    total := score.Wins + score.Losses + score.Draws
+    if total == 0 {
+        return 0
+    }
+    return float64(score.Wins) / float64(total) * 100
+}
+
+func showLeaderboard(s *discordgo.Session, channelID string) {
+    var players []struct {
+        UserID   string
+        Username string
+        Score    *PlayerScore
+        WinRate  float64
+    }
+    for userID, score := range playerScores {
+        user, _ := s.User(userID)
+        username := "Unknown"
+        if user != nil {
+            username = user.Username
+        }
+        players = append(players, struct {
+            UserID   string
+            Username string
+            Score    *PlayerScore
+            WinRate  float64
+        }{
+            UserID:   userID,
+            Username: username,
+            Score:    score,
+            WinRate:  calculateWinRate(score),
+        })
+    }
+    sort.Slice(players, func(i, j int) bool {
+        return players[i].WinRate > players[j].WinRate
+    })
+    var description strings.Builder
+    description.WriteString("🏆 Top Players:\n\n")
+    
+    for i, player := range players {
+        if i >= 10 {
+            break
+        }
+        description.WriteString(fmt.Sprintf(
+            "**%d.** %s\n├ Rbe7: %d | Khser: %d | T3adol: %d\n└ Win Rate: %.1f%%\n\n",
+            i+1, player.Username,
+            player.Score.Wins, player.Score.Losses, player.Score.Draws,
+            player.WinRate,
+        ))
+    }
+
+    embed := &discordgo.MessageEmbed{
+        Title:       "🏆 Leaderboard",
+        Description: description.String(),
+        Color:       0xFFD700,
+    }
+    s.ChannelMessageSendEmbed(channelID, embed)
+}
 
 
 func handleMusic(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
@@ -1610,41 +1851,58 @@ func handleClearChat(s *discordgo.Session, m *discordgo.MessageCreate, args []st
     s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Msa7t %d dyal messages.", len(messageIDs)))
 }
 func askGem(s *discordgo.Session, m *discordgo.MessageCreate, q string) string {
-	s.ChannelTyping(m.ChannelID)
-	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
-	if err != nil {
-		logMsg("ERROR", fmt.Sprintf("Error creating Gemini client: %v", err))
-		return "Error creating Gemini client"
-	}
-	defer client.Close()
-
-	model := client.GenerativeModel("gemini-1.5-flash")
-	resp, err := model.GenerateContent(ctx, genai.Text(q))
-	if err != nil {
-		logMsg("ERROR", fmt.Sprintf("Error generating content: %v", err))
-		return "Error generating response"
-	}
-
-	var response strings.Builder
-	for _, cand := range resp.Candidates {
-		if cand.Content != nil {
-			for _, part := range cand.Content.Parts {
-				partJSON, _ := json.Marshal(part)
-				response.WriteString(string(partJSON))
-			}
-		}
-	}
-
-	if response.Len() == 0 {
-		return "No response generated"
-	}
-
-	r := response.String()
-	r = strings.ReplaceAll(r, "\"", "")
-	r = strings.ReplaceAll(r, "\\n", "\n")
-	r = strings.ReplaceAll(r, "\\t", "\t")
-	return r
+    switch strings.ToLower(strings.TrimSpace(q)) {
+    case "salam", "slm", "slt":
+        return "9lawi 3la hdra dyal facebook , chri m3ak lbitcoin "
+    case "fin saken":
+        return "fkrk , ada7k ana saken fwa7d pc 7achak hh"
+    case "chkoun nta" : 
+        return "li 7wak hh"
+    case "katdwi ghi bdarija": 
+        return "tndwi bkolchi walakin wlad l97ab frdo 3lina had darija"
+    case "ach tyban lik flmodawana jdida":
+        return " ra mb9itch ga3 9ad njawb bsbaha akhoya"
+    case "kolchi mzyan ?":
+        return "swlni ki jatni lwalida 3ndk b3da hh"
+    case "ach tyban lik f m6":   
+        return "fiha fasl 7adari "    
+    }
+    s.ChannelTyping(m.ChannelID)
+    ctx := context.Background()
+    client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
+    if err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error creating Gemini client: %v", err))
+        return "kayn chi mochkil (ima skill issues ola chi 7aja khra)"     
+    }
+    defer client.Close()
+    darija_prompt := `Respond naturally in Moroccan Darija (using Latin script/ darija ) to the following question. 
+    Give only a single, direct response without explanations or translations. Keep it casual and conversational: ` + q
+    model := client.GenerativeModel("gemini-1.5-flash")
+    resp, err := model.GenerateContent(ctx, genai.Text(darija_prompt))
+    if err != nil {
+        logMsg("ERROR", fmt.Sprintf("Error generating content: %v", err))
+        return "Error generating response"
+    }
+    
+    var response strings.Builder
+    for _, cand := range resp.Candidates {
+        if cand.Content != nil {
+            for _, part := range cand.Content.Parts {
+                partJSON, _ := json.Marshal(part)
+                response.WriteString(string(partJSON))
+            }
+        }
+    }
+    
+    if response.Len() == 0 {
+        return "No response generated"
+    }
+    
+    r := response.String()
+    r = strings.ReplaceAll(r, "\"", "")
+    r = strings.ReplaceAll(r, "\\n", "\n")
+    r = strings.ReplaceAll(r, "\\t", "\t")
+    return r
 }
 
 func findUserVoiceState(s *discordgo.Session, guildID, userID string) (*discordgo.VoiceState, error) {
@@ -1866,7 +2124,36 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			handleHelp(s, m)
 			return
 		}
-	}
+        if args[1] == "game" {
+            embed := &discordgo.MessageEmbed{
+                Title:       "🎮 7ajara Wara9a Mi9ass",
+                Description: "Mchina laysm7 lina?\n\n" +
+                    g1 + " = 7ajara\n" +
+                    g2 + " = wra9a\n" +
+                    g3 + " = mi9ass\n\n" +
+                    "Click 3la emoji bach tl3b!\n\n" +
+                    "🔄 = reamtch \n" + 
+                    "❌ = exit game",
+                Color:       0x00FF00,
+                Footer: &discordgo.MessageEmbedFooter{
+                    Text:    "Gwima m3a hbibna :  @" + m.Author.Username,
+                    IconURL: m.Author.AvatarURL(""),
+                },
+            }
+           
+            msg, err := s.ChannelMessageSendEmbed(m.ChannelID, embed)
+            if err != nil {
+                logMsg("ERROR", fmt.Sprintf("Error sending game message: %v", err))
+                return
+            }
+            s.MessageReactionAdd(msg.ChannelID, msg.ID, g1)
+            s.MessageReactionAdd(msg.ChannelID, msg.ID, g2)
+            s.MessageReactionAdd(msg.ChannelID, msg.ID, g3)
+            s.MessageReactionAdd(msg.ChannelID, msg.ID, "🔄")
+            s.MessageReactionAdd(msg.ChannelID, msg.ID, "❌")
+            return
+         }
+    }
 	if args[0] == v {
 		if len(args) == 1 {
 			startGame(s, m)
@@ -1888,7 +2175,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 }
 
 func main() {
-	loadData()
+    loadData() 
+    loadScores()
 	godotenv.Load()
 	if godotenv.Load() != nil {
 		logMsg("ERROR", "Error loading .env file")
@@ -1911,6 +2199,7 @@ func main() {
 	}
 
 	s.AddHandler(messageCreate)
+    s.AddHandler(handleGameReaction)
 	s.Identify.Intents = discordgo.IntentsAllWithoutPrivileged
 	err = s.Open()
 	if err != nil {
